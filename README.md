@@ -751,6 +751,7 @@ These calls return plain text and stay stateless: the extension does not inject 
 | `docs/ARCHITECTURE.md` | Design decisions and implementation structure |
 | `docs/REQUIREMENTS.md` | Product requirements and constraints |
 | `docs/RELEASE.md` | Release, package, and lifecycle verification workflow |
+| `docs/SECURITY.md` | Dependency audit policy and accepted development-only advisory exceptions |
 | `docs/platform-smoke.md` | Crabbox macOS, Ubuntu, and native Windows release gate |
 | `docs/SUPPORT_MATRIX.md` | Current upstream support audit and release-readiness matrix |
 | `test/` | Wrapper, runtime, presentation, lifecycle, and package tests |
@@ -764,6 +765,7 @@ These calls return plain text and stay stateless: the extension does not inject 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the wrapper is designed
 - [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — product constraints and non-goals
 - [`docs/RELEASE.md`](docs/RELEASE.md) — maintainer release workflow
+- [`docs/SECURITY.md`](docs/SECURITY.md) — dependency audit policy and accepted development-only advisory exceptions
 - [`docs/SUPPORT_MATRIX.md`](docs/SUPPORT_MATRIX.md) — current upstream support matrix and closure evidence
 
 ## Where to go next
