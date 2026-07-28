@@ -58,7 +58,7 @@ npm run build
 npm run verify -- startup-profile --samples 3
 ```
 
-The profiler first clean-builds `dist/`, then records only direct package entrypoint import/factory timing in fresh Node processes, writes `.artifacts/startup-profile/latest.json`, and includes a safety block confirming it did not launch Pi, tmux, mise, npm, browsers, or `agent-browser`. Full Pi TUI ready-prompt profiling is intentionally excluded because repeated real Pi/tmux launches proved too invasive for routine verification on the operator machine.
+The profiler first clean-builds `dist/`, then records sequential direct package entrypoint import/factory timing in fresh Node processes, writes `.artifacts/startup-profile/latest.json`, and includes a safety block confirming it did not launch Pi, tmux, mise, npm, browsers, or `agent-browser`. Its 250 ms regression gate uses the best fresh-process sample because host scheduling adds positive elapsed-time jitter; a sustained startup regression must exceed the budget in every sample. The report retains median, mean, p95, and maximum diagnostics. Full Pi TUI ready-prompt profiling is intentionally excluded because repeated real Pi/tmux launches proved too invasive for routine verification on the operator machine.
 
 For a deterministic host-only real-browser wrapper smoke without model choice in the loop, run:
 
