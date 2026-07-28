@@ -7,13 +7,11 @@
  */
 
 import { execFile as execFileCallback } from "node:child_process";
-import { createRequire } from "node:module";
 import { join } from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const require = createRequire(import.meta.url);
 const REQUIRED_SOURCE_BUILD_MODULES = [
 	"typescript",
 	"typebox",
@@ -24,7 +22,7 @@ const REQUIRED_SOURCE_BUILD_MODULES = [
 function canResolveBuildDependencies() {
 	return REQUIRED_SOURCE_BUILD_MODULES.every((moduleName) => {
 		try {
-			require.resolve(moduleName);
+			import.meta.resolve(moduleName);
 			return true;
 		} catch {
 			return false;
