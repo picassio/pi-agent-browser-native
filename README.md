@@ -689,7 +689,7 @@ Use the npm version declared in `package.json` `packageManager` when refreshing 
 Quick isolated checkout smoke test:
 
 ```bash
-pi --approve --no-extensions -e .
+pi --approve --no-extensions -e ./extensions/agent-browser/index.ts
 ```
 
 This bypasses Pi settings and configured extensions while explicitly trusting this checkout's project-local inputs for the run. Omit `--approve` when you want to exercise Pi's interactive Project Trust prompt instead. After editing extension code, restart that Pi process to test the new checkout.
