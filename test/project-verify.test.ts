@@ -21,6 +21,26 @@ function labels(steps: Array<{ args: string[]; env?: Record<string, string> }>):
 	return steps.map((step) => step.args.join(" "));
 }
 
+test("quick isolated Pi guidance loads the extension entrypoint file", () => {
+	const guidancePaths = [
+		"AGENTS.md",
+		"README.md",
+		"docs/ARCHITECTURE.md",
+		"docs/RELEASE.md",
+		"docs/REQUIREMENTS.md",
+		"docs/SUPPORT_MATRIX.md",
+		"extensions/agent-browser/index.ts",
+	];
+
+	for (const path of guidancePaths) {
+		assert.doesNotMatch(
+			readFileSync(path, "utf8"),
+			/(?:-e|--extension) (?:\.|\/absolute\/path\/to\/pi-agent-browser-native)(?=[\s`]|$)/,
+			`${path} must pass the extension entrypoint file to Pi's -e/--extension flag`,
+		);
+	}
+});
+
 test("typecheck gate covers shared JavaScript config policy implementation", () => {
 	const tsconfig = JSON.parse(readFileSync("tsconfig.json", "utf8")) as { compilerOptions?: { allowJs?: boolean; noUnusedLocals?: boolean }; include?: string[] };
 	assert.equal(tsconfig.compilerOptions?.allowJs, true);
