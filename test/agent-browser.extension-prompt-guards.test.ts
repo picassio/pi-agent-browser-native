@@ -80,13 +80,22 @@ if (args.includes("screenshot")) {
 
 	try {
 		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir, prompt: `Save a screenshot here: ${screenshotPath}` });
+			const harness = createExtensionHarness({ cwd: tempDir, prompt: `Required workflow:
+\`\`\`bash
+SHOT=/tmp/example
+agent-browser screenshot $SHOT/example.png
+\`\`\`
+Wrong: Screenshot saved to ~/.ab/agents/hawkeye/deliverables/example.png
+Right: ![Evidence](/api/files/daredevil/<task-short-id>/example.png)
+Run \`screenshot /tmp/example.png\` as an example.
+Save a screenshot here: ${screenshotPath}` });
 			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
 			const blockedClose = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["close"] });
 			assert.equal(blockedClose.isError, true);
 			assert.match((blockedClose.content[0] as { text: string }).text, /requested artifact path is missing or unverified/);
-			assert.equal((blockedClose.details?.promptGuard as { missingArtifacts?: Array<{ path?: string }> } | undefined)?.missingArtifacts?.[0]?.path, screenshotPath);
+			const missingArtifacts = (blockedClose.details?.promptGuard as { missingArtifacts?: Array<{ path?: string }> } | undefined)?.missingArtifacts;
+			assert.deepEqual(missingArtifacts?.map((artifact) => artifact.path), [screenshotPath]);
 
 			const screenshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["screenshot", screenshotPath] });
 			assert.equal(screenshot.isError, false, JSON.stringify(screenshot));
