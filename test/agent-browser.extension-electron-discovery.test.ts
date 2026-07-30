@@ -17,6 +17,9 @@ import {
 	ELECTRON_DISCOVERY_MAX_RESULTS,
 } from "../extensions/agent-browser/lib/electron/discovery.js";
 import {
+	pollDevToolsActivePort,
+} from "../extensions/agent-browser/lib/electron/launch.js";
+import {
 	cleanupElectronLaunchResources,
 } from "../extensions/agent-browser/lib/electron/cleanup.js";
 import {
@@ -202,6 +205,27 @@ test("agentBrowserExtension cleans Electron resources when launch fails before u
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
 		}
+	}
+});
+
+test("pollDevToolsActivePort reports found:false on a timeout that fires before the first poll", async () => {
+	// Regression: when the deadline has already elapsed before the first loop
+	// iteration (short timeout under load), the timeout result must still carry a
+	// devToolsActivePort read (found:false) rather than an undefined value, so the
+	// failed-launch cleanup diagnostics report the expected no-port-file result.
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-electron-past-deadline-"));
+	try {
+		const result = await pollDevToolsActivePort({
+			deadlineMs: Date.now() - 1,
+			getChildExit: () => ({ code: null, signal: null }),
+			getSpawnError: () => undefined,
+			userDataDir: tempDir,
+		});
+		assert.equal(result.failure, "timeout");
+		assert.equal(result.devToolsActivePort?.found, false);
+		assert.equal(result.port, undefined);
+	} finally {
+		await rm(tempDir, { force: true, recursive: true });
 	}
 });
 
