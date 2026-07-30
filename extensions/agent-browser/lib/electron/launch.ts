@@ -234,7 +234,7 @@ async function pollDevToolsActivePort(options: {
 	userDataDir: string;
 }): Promise<{ devToolsActivePort?: ElectronDevToolsActivePortRead; failure?: ElectronLaunchFailureReason; port?: number; spawnError?: Error }> {
 	let devToolsActivePort: ElectronDevToolsActivePortRead | undefined;
-	while (Date.now() <= options.deadlineMs) {
+	do {
 		const spawnError = options.getSpawnError();
 		if (spawnError) return { devToolsActivePort, failure: "spawn-error", spawnError };
 		devToolsActivePort = await readDevToolsActivePort(options.userDataDir);
@@ -243,8 +243,9 @@ async function pollDevToolsActivePort(options: {
 		if (exit.code !== null || exit.signal !== null) {
 			return { devToolsActivePort, failure: exit.code === 0 ? "single-instance-conflict" : "spawn-error" };
 		}
+		if (Date.now() > options.deadlineMs) break;
 		await sleep(ELECTRON_DEVTOOLS_POLL_INTERVAL_MS);
-	}
+	} while (true);
 	return { devToolsActivePort, failure: "timeout" };
 }
 
