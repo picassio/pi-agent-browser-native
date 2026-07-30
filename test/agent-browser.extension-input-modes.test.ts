@@ -619,7 +619,7 @@ process.stdin.on("end", () => {
 			assert.deepEqual(result.details?.args, ["batch", "--bail"]);
 			const effectiveArgs = result.details?.effectiveArgs as string[] | undefined;
 			assert.deepEqual(effectiveArgs?.slice(0, 2), ["--json", "--session"]);
-			assert.match(effectiveArgs?.[2] ?? "", /^piab-pi-agent-browser-job-/);
+			assert.match(effectiveArgs?.[2] ?? "", /^piab-pi-agent-browse-123456781234-[a-f0-9]{8}$/);
 			assert.equal(effectiveArgs?.[3], "batch");
 			assert.equal(effectiveArgs?.[4], "--bail");
 			const compiledJob = result.details?.compiledJob as { args?: string[]; failFast?: boolean; stdin?: string; steps?: Array<{ action: string; args: string[]; generatedFrom?: string }> } | undefined;
