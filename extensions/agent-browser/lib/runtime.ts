@@ -53,7 +53,7 @@ const DEFAULT_HEADLESS_COMPAT_USER_AGENT_BY_PLATFORM: Partial<Record<NodeJS.Plat
 const FALLBACK_HEADLESS_COMPAT_USER_AGENT =
 	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
 const SHELL_OPERATOR_TOKENS = new Set(["&&", "||", "|", ";", ">", ">>", "<"]);
-const MAX_PROJECT_SLUG_LENGTH = 24;
+const MAX_PROJECT_SLUG_LENGTH = 15;
 const SESSION_NAME_CWD_HASH_LENGTH = 8;
 const SESSION_NAME_SESSION_ID_LENGTH = 12;
 

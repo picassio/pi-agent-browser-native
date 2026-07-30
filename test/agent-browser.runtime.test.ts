@@ -37,7 +37,7 @@ test("createImplicitSessionName is stable for a persisted pi session", () => {
 	const two = createImplicitSessionName(sessionId, cwd, "ignored-b");
 
 	assert.equal(one, two);
-	assert.match(one, /^piab-pi-agent-browser-123456781234-[a-f0-9]{8}$/);
+	assert.match(one, /^piab-pi-agent-browse-123456781234-[a-f0-9]{8}$/);
 });
 
 test("createImplicitSessionName includes cwd isolation for same-named checkouts", () => {
@@ -48,6 +48,22 @@ test("createImplicitSessionName includes cwd isolation for same-named checkouts"
 	assert.notEqual(one, two);
 	assert.match(one, /^piab-app-123456781234-[a-f0-9]{8}$/);
 	assert.match(two, /^piab-app-123456781234-[a-f0-9]{8}$/);
+});
+
+test("fresh managed session names fit the reproduced upstream unix socket ceiling", () => {
+	const sessionId = "019fb3dc-003a-7fdb-b3e8-e1471acc240b";
+	const cwd = "/home/ubuntu/projects/pi-agent-browser-native/.worktrees/ab-pab-0065-qa-pab-0059-fix-prompt-artifact-example-6qx";
+	const base = createImplicitSessionName(sessionId, cwd, "seed");
+	const first = createFreshSessionName(base, "seed", 1);
+	const second = createFreshSessionName(base, "seed", 2);
+	const reproducedSocketPathOverheadBytes = 44;
+	const upstreamUnixSocketPathMaxBytes = 103;
+
+	assert.ok(Buffer.byteLength(first) + reproducedSocketPathOverheadBytes <= upstreamUnixSocketPathMaxBytes);
+	assert.equal(createFreshSessionName(base, "seed", 1), first);
+	assert.notEqual(second, first);
+	assert.notEqual(createImplicitSessionName(sessionId, `${cwd}-other`, "seed"), base);
+	assert.notEqual(createImplicitSessionName("119fb3dc-003a-7fdb-b3e8-e1471acc240b", cwd, "seed"), base);
 });
 
 test("getAgentBrowserSocketDir uses a short user-specific unix socket directory and skips windows", () => {
