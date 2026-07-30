@@ -227,7 +227,7 @@ async function readDevToolsActivePort(userDataDir: string): Promise<ElectronDevT
 	}
 }
 
-async function pollDevToolsActivePort(options: {
+export async function pollDevToolsActivePort(options: {
 	deadlineMs: number;
 	getChildExit: () => { code: number | null; signal: NodeJS.Signals | null };
 	getSpawnError: () => Error | undefined;
@@ -245,7 +245,10 @@ async function pollDevToolsActivePort(options: {
 		}
 		await sleep(ELECTRON_DEVTOOLS_POLL_INTERVAL_MS);
 	}
-	return { devToolsActivePort, failure: "timeout" };
+	// Guarantee at least one port-file read so a timeout that fires before the
+	// first loop iteration (short deadline under load) still reports found:false
+	// instead of an undefined devToolsActivePort.
+	return { devToolsActivePort: devToolsActivePort ?? (await readDevToolsActivePort(options.userDataDir)), failure: "timeout" };
 }
 
 async function pollCdpMetadata(port: number, deadlineMs: number): Promise<{ targets: ElectronCdpTarget[]; version: ElectronCdpVersion } | undefined> {
