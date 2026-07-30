@@ -36,6 +36,14 @@ const PROMPT_ARTIFACT_REQUEST_PATTERN = /(?:\b(?:save|capture|take|write|store|p
 const INSTRUCTIONAL_ARTIFACT_LINE_PATTERN = /(?:^\s*(?:(?:[-*]\s*)?[❌✅]?\s*)?(?:(?:malformed\s+)?example|wrong|right)\s*:|\b(?:as an?|for(?: an?)?) example\b|!\[[^\n]*\]\s*\()/i;
 const MARKDOWN_FENCE_PATTERN = /^\s*(`{3,}|~{3,})/;
 
+function getPromptArtifactCandidateContext(line: string, pathStart: number, pathEnd: number): string {
+	const prefix = line.slice(0, pathStart);
+	const boundaries = [...prefix.matchAll(/[.!?;]\s+/g)];
+	const lastBoundary = boundaries.at(-1);
+	const contextStart = lastBoundary ? (lastBoundary.index ?? 0) + lastBoundary[0].length : 0;
+	return line.slice(contextStart, pathEnd);
+}
+
 function inferPromptArtifactKind(line: string, path: string): PromptRequestedArtifact["kind"] | undefined {
 	const lowerPath = path.toLowerCase();
 	if (/\.(?:webm|mp4)$/.test(lowerPath)) return "recording";
@@ -58,14 +66,15 @@ function extractPromptRequestedArtifacts(prompt: string): PromptRequestedArtifac
 			else if (fenceMarker === marker) fenceMarker = undefined;
 			continue;
 		}
-		if (fenceMarker || INSTRUCTIONAL_ARTIFACT_LINE_PATTERN.test(line)) continue;
+		if (fenceMarker) continue;
 
 		PROMPT_ARTIFACT_PATH_PATTERN.lastIndex = 0;
 		for (const match of line.matchAll(PROMPT_ARTIFACT_PATH_PATTERN)) {
 			const path = match[1]?.trim();
 			if (!path || /^[~$]/.test(path) || /[<>{}\[\]]|\/api\/files\//i.test(path)) continue;
-			const pathEnd = (match.index ?? 0) + match[0].indexOf(path) + path.length;
-			if (!PROMPT_ARTIFACT_REQUEST_PATTERN.test(line.slice(0, pathEnd))) continue;
+			const pathStart = (match.index ?? 0) + match[0].indexOf(path);
+			const context = getPromptArtifactCandidateContext(line, pathStart, pathStart + path.length);
+			if (INSTRUCTIONAL_ARTIFACT_LINE_PATTERN.test(context) || !PROMPT_ARTIFACT_REQUEST_PATTERN.test(context)) continue;
 			const kind = inferPromptArtifactKind(line, path);
 			if (!kind) continue;
 			const key = `${kind}:${path}`;

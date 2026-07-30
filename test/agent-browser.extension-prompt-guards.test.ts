@@ -80,15 +80,7 @@ if (args.includes("screenshot")) {
 
 	try {
 		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir, prompt: `Required workflow:
-\`\`\`bash
-SHOT=/tmp/example
-agent-browser screenshot $SHOT/example.png
-\`\`\`
-Wrong: Screenshot saved to ~/.ab/agents/hawkeye/deliverables/example.png
-Right: ![Evidence](/api/files/daredevil/<task-short-id>/example.png)
-Run \`screenshot /tmp/example.png\` as an example.
-Save a screenshot here: ${screenshotPath}` });
+			const harness = createExtensionHarness({ cwd: tempDir, prompt: `Save a screenshot here: ${screenshotPath}. Required workflow: \`\`\`bash SHOT=/tmp/example agent-browser screenshot $SHOT/example.png \`\`\` Wrong: Screenshot saved to ~/.ab/agents/hawkeye/deliverables/example.png Right: ![Evidence](/api/files/daredevil/<task-short-id>/example.png) Run \`screenshot /tmp/example.png\` as an example.` });
 			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
 			const blockedClose = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["close"] });
