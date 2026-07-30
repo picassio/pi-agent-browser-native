@@ -68,6 +68,30 @@ test("buildPromptPolicy keeps recording paths distinct when prompts are collapse
 	]);
 });
 
+test("buildPromptPolicy ignores instructional artifact examples while retaining a concrete request", () => {
+	const policy = buildPromptPolicy(`Every report must embed screenshots.
+
+\`\`\`bash
+SHOT=~/.ab/agents/daredevil/deliverables/<task-short-id>
+agent-browser screenshot $SHOT/bug-evidence.png
+\`\`\`
+
+Wrong: Screenshot saved to ~/.ab/agents/hawkeye/deliverables/ab-0420/desktop.png
+Right: ![Bug evidence](/api/files/daredevil/<task-short-id>/bug-evidence.png)
+Malformed example: ![Desktop](/api/files/hawkeye/ab-0420/desktop.png
+Run \`screenshot /tmp/example.png\` as an example.
+Save the required screenshot to /tmp/actual-evidence.png before closing.`);
+
+	assert.deepEqual(policy.requestedArtifacts, [
+		{ kind: "screenshot", path: "/tmp/actual-evidence.png", required: true },
+	]);
+
+	const collapsedPolicy = buildPromptPolicy("Save a screenshot here: /tmp/collapsed-evidence.png. Right: ![Example](/api/files/daredevil/example.png)");
+	assert.deepEqual(collapsedPolicy.requestedArtifacts, [
+		{ kind: "screenshot", path: "/tmp/collapsed-evidence.png", required: true },
+	]);
+});
+
 test("shouldAppendBrowserSystemPrompt only targets clearly browser-oriented prompts", () => {
 	assert.equal(shouldAppendBrowserSystemPrompt("Open https://example.com and take a snapshot."), true);
 	assert.equal(shouldAppendBrowserSystemPrompt("Do web research and read the live docs for this API."), true);

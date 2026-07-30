@@ -326,7 +326,7 @@ function buildQaVisibleTextPredicate(text: string): string {
     if (skipTags.has(element.tagName)) return false;
     const style = window.getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
-    return element.getClientRects().length > 0;
+    return style.display === "contents" || element.getClientRects().length > 0;
   };
   const hasVisibleAncestors = (node) => {
     for (let element = node.parentElement; element; element = element.parentElement) {

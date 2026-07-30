@@ -25,6 +25,57 @@ import {
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
 
+test("QA expectedText treats display: contents as visible without weakening hidden-style guards", () => {
+	class TestElement {
+		readonly tagName: string;
+		parentElement: TestElement | null;
+		readonly style: { display: string; opacity: string; visibility: string };
+		readonly value = "";
+		readonly rectCount: number;
+
+		constructor(tagName: string, parentElement: TestElement | null, display = "block", rectCount = 1) {
+			this.tagName = tagName;
+			this.parentElement = parentElement;
+			this.style = { display, opacity: "1", visibility: "visible" };
+			this.rectCount = rectCount;
+		}
+
+		getClientRects(): unknown[] {
+			return Array.from({ length: this.rectCount });
+		}
+	}
+
+	const root = new TestElement("BODY", null);
+	const contents = new TestElement("DIV", root, "contents", 0);
+	const heading = new TestElement("H2", contents);
+	const textNode = { nodeValue: "Đăng nhập", parentElement: heading };
+	const compiled = compileAgentBrowserQaPreset({ attached: true, expectedText: "Đăng nhập" }).compiled;
+	const predicate = compiled?.steps.find((step) => step.action === "assertText")?.args[2];
+	assert.ok(predicate);
+	const evaluate = () => Function("document", "window", "HTMLElement", "NodeFilter", `return ${predicate}`)(
+		{
+			body: root,
+			createTreeWalker: (_root: unknown, type: number) => {
+				const nodes = type === 4 ? [textNode] : [contents, heading];
+				let index = 0;
+				return { nextNode: () => nodes[index++] ?? null };
+			},
+			documentElement: root,
+		},
+		{ getComputedStyle: (element: TestElement) => element.style },
+		TestElement,
+		{ SHOW_ELEMENT: 1, SHOW_TEXT: 4 },
+	);
+
+	assert.equal(evaluate(), true, "display: contents ancestors preserve descendant visibility");
+	for (const [property, hiddenValue] of [["display", "none"], ["visibility", "hidden"], ["opacity", "0"]] as const) {
+		const visibleValue = contents.style[property];
+		contents.style[property] = hiddenValue;
+		assert.equal(evaluate(), false, `${property}: ${hiddenValue} remains hidden`);
+		contents.style[property] = visibleValue;
+	}
+});
+
 test("analyzeQaPresetTimeout reports unverified expected-text timeouts as QA failures", () => {
 	const compiled = compileAgentBrowserQaPreset({ url: "https://example.test/", expectedText: "Definitely Not On This Page" }).compiled;
 	assert.ok(compiled);
@@ -619,7 +670,7 @@ process.stdin.on("end", () => {
 			assert.deepEqual(result.details?.args, ["batch", "--bail"]);
 			const effectiveArgs = result.details?.effectiveArgs as string[] | undefined;
 			assert.deepEqual(effectiveArgs?.slice(0, 2), ["--json", "--session"]);
-			assert.match(effectiveArgs?.[2] ?? "", /^piab-pi-agent-browser-job-/);
+			assert.match(effectiveArgs?.[2] ?? "", /^piab-pi-agent-browse-/);
 			assert.equal(effectiveArgs?.[3], "batch");
 			assert.equal(effectiveArgs?.[4], "--bail");
 			const compiledJob = result.details?.compiledJob as { args?: string[]; failFast?: boolean; stdin?: string; steps?: Array<{ action: string; args: string[]; generatedFrom?: string }> } | undefined;

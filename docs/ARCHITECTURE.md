@@ -2,7 +2,7 @@
 
 Related docs:
 - [`../README.md`](../README.md)
-- [`../AGENTS.md`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/AGENTS.md) (maintainer workflows, including upstream capability baseline)
+- [`../AGENTS.md`](https://github.com/picassio/pi-agent-browser-native/blob/main/AGENTS.md) (maintainer workflows, including upstream capability baseline)
 - [`REQUIREMENTS.md`](REQUIREMENTS.md)
 - [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)
 - [`ELECTRON.md`](ELECTRON.md)
@@ -85,7 +85,7 @@ Tier B guidance lives in `SHARED_BROWSER_PLAYBOOK_GUIDELINES`, generated README/
 Do **not** add reusable browser recipes as a first-class runtime surface yet.
 
 Current evidence does not justify another source of truth for workflows:
-- the deterministic efficiency benchmark in [`scripts/agent-browser-efficiency-benchmark.mjs`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/scripts/agent-browser-efficiency-benchmark.mjs) models one native `job` scenario (`job-open-assert-screenshot`), one `qa` preset (`qa-open-diagnostics`), one `sourceLookup` (`source-lookup-visible-element`), one `networkSourceLookup` (`network-source-lookup-failed-request`), plus deterministic `electron` lifecycle/probe scenarios (`electron-lifecycle`, `electron-probe`) rather than repeated named job patterns that agents keep re-specifying
+- the deterministic efficiency benchmark in [`scripts/agent-browser-efficiency-benchmark.mjs`](https://github.com/picassio/pi-agent-browser-native/blob/main/scripts/agent-browser-efficiency-benchmark.mjs) models one native `job` scenario (`job-open-assert-screenshot`), one `qa` preset (`qa-open-diagnostics`), one `sourceLookup` (`source-lookup-visible-element`), one `networkSourceLookup` (`network-source-lookup-failed-request`), plus deterministic `electron` lifecycle/probe scenarios (`electron-lifecycle`, `electron-probe`) rather than repeated named job patterns that agents keep re-specifying
 - repo-local dogfood evidence does not show repeated project-specific job recipes that need versioning or ownership
 - `qa` already covers the only repeated smoke-test shape with a stable top-level preset
 - docs and prompt guidance can carry examples without adding recipe state, migration rules, or another schema
@@ -98,8 +98,8 @@ The published package should load from the `pi` manifest in `package.json`.
 
 Local checkout validation has two intentional modes:
 
-- **Quick isolated mode:** use explicit CLI loading such as `pi --approve --no-extensions -e .` from the repository root when this checkout is intentionally trusted. This bypasses Pi settings and extension discovery, avoids duplicate `agent_browser` registrations when another source is installed globally, and is the right mode for checkout smoke tests; omit `--approve` only when deliberately testing Pi's Project Trust prompt.
-- **Configured-source lifecycle mode:** configure exactly one active checkout or package source in Pi settings and launch plain `pi` for manual validation, or run the automated harness that launches with `--approve`. This is the right mode for validating `/reload` and exact-session relaunch because those lifecycle checks exercise discovered/configured resources. Focused extension harness tests validate branch-backed `session_tree` rehydration and cleanup ownership. Before shipping, maintainers also run `npm run verify -- lifecycle` (same semantics under automation, using Pi 0.79 `--approve --session-id` to reopen the exact JSONL session) plus the live-site checks in [`RELEASE.md`](RELEASE.md#pre-release-checks); `npm publish` enforces `npm run verify -- release` via `prepublishOnly` unless scripts are skipped.
+- **Quick isolated mode:** use explicit CLI loading such as `pi --approve --no-extensions -e ./extensions/agent-browser/index.ts` from the repository root when this checkout is intentionally trusted. This bypasses Pi settings and extension discovery, avoids duplicate `agent_browser` registrations when another source is installed globally, and is the right mode for checkout smoke tests; omit `--approve` only when deliberately testing Pi's Project Trust prompt.
+- **Configured-source lifecycle mode:** configure exactly one active checkout or package source in Pi settings and launch plain `pi` for manual validation, or run the automated harness that launches with `--approve`. This is the right mode for validating `/reload` and exact-session relaunch because those lifecycle checks exercise discovered/configured resources. Focused extension harness tests validate branch-backed `session_tree` rehydration and cleanup ownership. Before shipping, maintainers also run `npm run verify -- lifecycle` (same semantics under automation, using Pi 0.79 `--approve --session-id` to reopen the exact JSONL session) plus the live-site checks in [`RELEASE.md`](RELEASE.md#pre-release-checks). The canonical tag workflow gates publication on hosted native macOS/Ubuntu/Windows verification; `prepublishOnly` independently enforces `verify -- pre-pr` and package inspection.
 
 The repo should not add a repo-local `.pi/extensions/` autoload shim as the documented checkout path.
 
@@ -211,7 +211,7 @@ Upstream restore-state persistence remains upstream-owned. The wrapper passes `A
 - inline screenshots/images for the plain `screenshot` command; other image-like saves (for example `diff screenshot`) still appear in `details.artifacts` and summaries but are not auto-inlined as Pi image attachments (see [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md#details))
 - lightweight session convenience
 - docs, including a repo-readable command reference that mirrors the blocked direct-binary help path closely enough for normal agent work
-- a deterministic **agent efficiency benchmark** (`scripts/agent-browser-efficiency-benchmark.mjs`) used to quantify representative agent-facing workflows without invoking upstream; maintainer commands and constraints are in [`AGENTS.md`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/AGENTS.md) under “Agent browser efficiency benchmark”
+- a deterministic **agent efficiency benchmark** (`scripts/agent-browser-efficiency-benchmark.mjs`) used to quantify representative agent-facing workflows without invoking upstream; maintainer commands and constraints are in [`AGENTS.md`](https://github.com/picassio/pi-agent-browser-native/blob/main/AGENTS.md) under “Agent browser efficiency benchmark”
 
 ### Upstream `agent-browser` owns
 
@@ -231,7 +231,7 @@ The extension does not ship `agent-browser`, but it does ship maintainer-owned d
 
 3. **Live help verification** is `scripts/verify-command-reference.mjs`, invoked via `npm run verify -- command-reference` (and included in the default `npm run verify` gate). It runs the baseline’s help commands against `agent-browser` on `PATH` and fails when the installed upstream surface does not match the declared target version or expected tokens.
 
-This mirrors the playbook contract pattern described in [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md): canonical TypeScript source and Markdown fragments stay paired through `npm run docs` / `npm run verify`, with deeper step-by-step notes in [`AGENTS.md`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/AGENTS.md), release checklist items in [`RELEASE.md`](RELEASE.md), and the baseline inventory-to-gates matrix in [`SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md).
+This mirrors the playbook contract pattern described in [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md): canonical TypeScript source and Markdown fragments stay paired through `npm run docs` / `npm run verify`, with deeper step-by-step notes in [`AGENTS.md`](https://github.com/picassio/pi-agent-browser-native/blob/main/AGENTS.md), release checklist items in [`RELEASE.md`](RELEASE.md), and the baseline inventory-to-gates matrix in [`SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md).
 
 ## Not the right design
 

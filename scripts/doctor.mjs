@@ -3,7 +3,7 @@
  * Purpose: Diagnose first-run pi-agent-browser-native setup without mutating Pi or agent-browser state.
  * Responsibilities: Check upstream agent-browser PATH/version, inspect Pi settings for duplicate package/checkout sources, and print actionable remediation.
  * Scope: Read-only package diagnostics only; upstream browser runtime health remains the responsibility of upstream `agent-browser doctor`.
- * Usage: Run via `pi-agent-browser-doctor`, `npm exec --package pi-agent-browser-native -- pi-agent-browser-doctor`, or `npm run doctor` from this repository.
+ * Usage: Run via `pi-agent-browser-doctor`, `npm exec --package @picassio/pi-agent-browser-native -- pi-agent-browser-doctor`, or `npm run doctor` from this repository.
  * Invariants/Assumptions: The wrapper targets CAPABILITY_BASELINE.targetVersion, does not bundle agent-browser, and must not edit Pi settings or run fixing commands.
  */
 
@@ -18,8 +18,12 @@ import { promisify } from "node:util";
 import { CAPABILITY_BASELINE, CAPABILITY_BASELINE_SOURCE } from "./agent-browser-capability-baseline.mjs";
 
 const execFile = promisify(execFileCallback);
-const PACKAGE_NAME = "pi-agent-browser-native";
-const REPO_URL_FRAGMENT = "github.com/fitchmultz/pi-agent-browser-native";
+const PACKAGE_NAME = "@picassio/pi-agent-browser-native";
+const COMPAT_PACKAGE_NAMES = new Set([PACKAGE_NAME, "pi-agent-browser-native"]);
+const REPO_URL_FRAGMENTS = Object.freeze([
+	"github.com/picassio/pi-agent-browser-native",
+	"github.com/fitchmultz/pi-agent-browser-native",
+]);
 const EXTENSION_ENTRYPOINTS = Object.freeze([
 	"extensions/agent-browser/index.ts",
 	"dist/extensions/agent-browser/index.js",
@@ -75,7 +79,7 @@ Checks:
 
 Examples:
   pi-agent-browser-doctor
-  npm exec --package pi-agent-browser-native -- pi-agent-browser-doctor
+  npm exec --package @picassio/pi-agent-browser-native -- pi-agent-browser-doctor
   npm run doctor
   pi-agent-browser-doctor --cwd /path/to/project --settings /tmp/pi-settings.json
 
@@ -160,9 +164,9 @@ function isPathLikeSource(source) {
 function sourceLooksLikeThisPackage(source, cwd, sourceBaseDir = cwd) {
 	const text = String(source ?? "").trim();
 	if (text.length === 0) return false;
-	if (/^npm:pi-agent-browser-native(?:@|$)/.test(text)) return true;
-	if (text === PACKAGE_NAME) return true;
-	if (text.includes(REPO_URL_FRAGMENT)) return true;
+	if (/^npm:(?:@picassio\/pi-agent-browser-native|pi-agent-browser-native)(?:@|$)/.test(text)) return true;
+	if (COMPAT_PACKAGE_NAMES.has(text)) return true;
+	if (REPO_URL_FRAGMENTS.some((fragment) => text.includes(fragment))) return true;
 
 	if (!isPathLikeSource(text)) return false;
 	const resolvedSource = resolve(sourceBaseDir, expandUserPath(text));
@@ -392,7 +396,7 @@ async function checkPiSources({ cwd, agentDir, settingsPaths, readText, pathExis
 				"Detected sources:",
 				...sources.map((source) => `- ${source.source} from ${source.location}`),
 				"Keep exactly one active source:",
-				"- for normal use: keep `pi install npm:pi-agent-browser-native` and remove/disable checkout paths from Pi settings",
+				`- for normal use: keep \`pi install npm:${PACKAGE_NAME}\` and remove/disable checkout paths from Pi settings`,
 				"- for temporary package or checkout trials: use `pi --approve --no-extensions -e <source>` when you intentionally trust the current project, or omit `--approve` to let Pi prompt in interactive mode",
 				"- for configured-source lifecycle validation: keep exactly one checkout or package source, then launch plain `pi`",
 			],
@@ -411,7 +415,7 @@ async function checkPiSources({ cwd, agentDir, settingsPaths, readText, pathExis
 		status: "warn",
 		title: "No configured pi-agent-browser-native source was found in inspected Pi settings.",
 		lines: [
-			"This is OK for isolated runs such as `pi --no-extensions -e npm:pi-agent-browser-native`, but normal package use should install exactly one source with `pi install npm:pi-agent-browser-native`.",
+			`This is OK for isolated runs such as \`pi --no-extensions -e npm:${PACKAGE_NAME}\`, but normal package use should install exactly one source with \`pi install npm:${PACKAGE_NAME}\`.`,
 		],
 		warnings,
 	};

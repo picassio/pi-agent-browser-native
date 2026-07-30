@@ -367,7 +367,7 @@ test("packToTemporaryPackageDir writes a tarball even under npm publish dry-run 
 	try {
 		packed = await packToTemporaryPackageDir();
 		await access(join(packed.packageDir, "package.json"));
-		assert.match(packed.packResult.filename, /^pi-agent-browser-native-.*\.tgz$/);
+		assert.match(packed.packResult.filename, /^picassio-pi-agent-browser-native-.*\.tgz$/);
 	} finally {
 		if (previousDryRun === undefined) {
 			delete process.env.npm_config_dry_run;

@@ -1,0 +1,57 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish scoped package
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: Use repository npm version
+        run: npm install --global npm@11.14.0
+      - name: Verify immutable tag contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_name=$(node -p "require('./package.json').name")
+          package_version=$(node -p "require('./package.json').version")
+          test "$package_name" = "@picassio/pi-agent-browser-native"
+          test "$GITHUB_REF_NAME" = "v$package_version"
+          test "$(git rev-list -n1 "$GITHUB_REF_NAME")" = "$GITHUB_SHA"
+          if npm view "$package_name@$package_version" version >/dev/null 2>&1; then
+            echo "$package_name@$package_version is already published" >&2
+            exit 1
+          fi
+      - name: Install dependencies
+        run: npm ci
+      - name: Install exact upstream engine
+        run: npm install --global agent-browser@0.33.0
+      - name: Publish verified package
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Verify registry identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_name=$(node -p "require('./package.json').name")
+          package_version=$(node -p "require('./package.json').version")
+          test "$(npm view "$package_name@$package_version" version)" = "$package_version"

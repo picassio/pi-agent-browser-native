@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Core and package gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          cache: npm
+      - name: Use repository npm version
+        run: npm install --global npm@11.14.0
+      - name: Install dependencies
+        run: npm ci
+      - name: Install exact upstream engine
+        run: npm install --global agent-browser@0.33.0
+      - name: Verify exact engine
+        run: test "$(agent-browser --version)" = "agent-browser 0.33.0"
+      - name: Default verification
+        run: npm run verify
+      - name: Packaged Pi verification
+        run: npm run verify -- package-pi
+      - name: Production dependency audit
+        run: npm audit --omit=dev
+      - name: Package manifest
+        run: npm pack --dry-run
+
+  platform:
+    name: Native ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          cache: npm
+      - name: Use repository npm version
+        run: npm install --global npm@11.14.0
+      - name: Install dependencies
+        run: npm ci
+      - name: Install exact upstream engine
+        run: npm install --global agent-browser@0.33.0
+      - name: Verify exact engine
+        shell: bash
+        run: test "$(agent-browser --version)" = "agent-browser 0.33.0"
+      - name: Install upstream browser runtime
+        run: agent-browser install
+      - name: Platform-local package gate
+        run: npm run verify -- platform-target
+      - name: Deterministic native browser dogfood
+        run: npm run verify -- dogfood --artifact-dir .artifacts/hosted-dogfood --keep-artifacts
+      - name: Upload dogfood evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-${{ matrix.os }}
+          path: .artifacts/hosted-dogfood
+          if-no-files-found: warn

@@ -48,6 +48,10 @@ function packageVersion() {
 	}
 }
 
+function packageSlug(config) {
+	return config.packageSlug ?? String(config.packageName).replace(/^@/, "").replace(/[^A-Za-z0-9._-]+/g, "-");
+}
+
 function crabboxVersion() {
 	try {
 		return execFileSync(crabboxBin(), ["--version"], { encoding: "utf8", stdio: "pipe", timeout: 10_000 }).trim().split(/\r?\n/)[0] ?? null;
@@ -190,7 +194,7 @@ export function createLeaseCleanupResult(config, targetName, leaseId, stopResult
 	const suiteName = "lease-cleanup";
 	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
 	const secretValues = collectSecretValues(authEnvAllowList(config));
-	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetEvidence(config, targetName, runId, `${config.packageName}-${targetName}`), null, 2));
+	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetEvidence(config, targetName, runId, `${packageSlug(config)}-${targetName}`), null, 2));
 	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, leaseId, modelCalls: 0 }, null, 2));
 	writeCommand(suiteDir, `crabbox stop ${targetName} --id ${leaseId}`);
 	writeExitCode(suiteDir, stopResult.code, stopResult.signal);
@@ -232,7 +236,7 @@ export function createLeaseWarmupFailureResult(config, targetName, warmupResult,
 	const suiteName = "lease-warmup";
 	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
 	const secretValues = collectSecretValues(authEnvAllowList(config));
-	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetEvidence(config, targetName, runId, `${config.packageName}-${targetName}`), null, 2));
+	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetEvidence(config, targetName, runId, `${packageSlug(config)}-${targetName}`), null, 2));
 	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, modelCalls: 0 }, null, 2));
 	writeCommand(suiteDir, `crabbox warmup ${targetName}`);
 	writeExitCode(suiteDir, warmupResult.code, warmupResult.signal);
@@ -254,7 +258,7 @@ export function createLeaseWarmupFailureResult(config, targetName, warmupResult,
 	return { ok: false, suiteDir, assertions };
 }
 
-export function buildPlatformBuildCommand(targetName, packageName = "pi-agent-browser-native", nodeValidationMajor = 22) {
+export function buildPlatformBuildCommand(targetName, packageName = "@picassio/pi-agent-browser-native", nodeValidationMajor = 22) {
 	if (platformFor(targetName) === "powershell") {
 		return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\platform-smoke\\platform-build-windows.ps1 -PackageName ${psSingleQuote(packageName)} -NodeValidationMajor ${nodeValidationMajor}`;
 	}
@@ -348,7 +352,7 @@ async function runBrowserDogfoodSuite(config, targetName, suiteName, leaseSessio
 	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
 	const startedAt = Date.now();
 	const platform = platformFor(targetName);
-	const slug = `${config.packageName}-${targetName}`;
+	const slug = `${packageSlug(config)}-${targetName}`;
 	const command = buildBrowserDogfoodCommand(targetName, config.agentBrowserVersion);
 	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetEvidence(config, targetName, runId, slug), null, 2));
 	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, modelCalls: 0, realBrowser: true }, null, 2));
@@ -413,7 +417,7 @@ async function runPlatformBuildSuite(config, targetName, suiteName, leaseSession
 	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
 	const startedAt = Date.now();
 	const platform = platformFor(targetName);
-	const slug = `${config.packageName}-${targetName}`;
+	const slug = `${packageSlug(config)}-${targetName}`;
 	const command = buildPlatformBuildCommand(targetName, config.packageName, config.nodeValidationMajor);
 	mkdirSync(dirname(suiteDir), { recursive: true });
 	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetEvidence(config, targetName, runId, slug), null, 2));
@@ -484,7 +488,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 }
 
 export async function runTargetSuites(config, targetName, suiteNames) {
-	const slug = `${config.packageName}-${targetName}`;
+	const slug = `${packageSlug(config)}-${targetName}`;
 	const runId = makeRunId();
 	const lease = await warmupLease(targetName, slug, config);
 	if (!lease.ok) {

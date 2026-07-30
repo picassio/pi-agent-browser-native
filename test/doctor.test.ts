@@ -122,7 +122,7 @@ test("doctor warns instead of failing when Pi version cannot be inspected", asyn
 
 test("doctor reports duplicate package and checkout sources with remediation", async () => {
 	const settingsByPath = new Map([
-		["/agent/settings.json", JSON.stringify({ packages: ["npm:pi-agent-browser-native"] })],
+		["/agent/settings.json", JSON.stringify({ packages: ["npm:@picassio/pi-agent-browser-native"] })],
 		["/repo/.pi/settings.json", JSON.stringify({ extensions: ["/repo/extensions/agent-browser/index.ts"] })],
 	]);
 	const report = await evaluateDoctorWithPi({
@@ -137,14 +137,14 @@ test("doctor reports duplicate package and checkout sources with remediation", a
 	assert.equal(report.failures.length, 1);
 	assert.match(text, /Duplicate pi-agent-browser-native sources detected/);
 	assert.match(text, /`agent_browser`/);
-	assert.match(text, /npm:pi-agent-browser-native/);
+	assert.match(text, /npm:@picassio\/pi-agent-browser-native/);
 	assert.match(text, /extensions\/agent-browser\/index\.ts/);
 	assert.match(text, /pi --approve --no-extensions -e <source>/);
 	assert.match(text, /keep exactly one active source/i);
 });
 
 test("doctor passes the source check when exactly one configured source is active", async () => {
-	const settingsByPath = new Map([["/agent/settings.json", JSON.stringify({ packages: ["npm:pi-agent-browser-native"] })]]);
+	const settingsByPath = new Map([["/agent/settings.json", JSON.stringify({ packages: ["npm:@picassio/pi-agent-browser-native"] })]]);
 	const report = await evaluateDoctorWithPi({
 		agentDir: "/agent",
 		cwd: "/repo",
@@ -156,7 +156,7 @@ test("doctor passes the source check when exactly one configured source is activ
 
 	assert.equal(report.failures.length, 0);
 	assert.match(text, /No duplicate pi-agent-browser-native sources detected/);
-	assert.match(text, /Detected source: npm:pi-agent-browser-native/);
+	assert.match(text, /Detected source: npm:@picassio\/pi-agent-browser-native/);
 });
 
 test("doctor resolves relative package sources from their settings file directory", async () => {

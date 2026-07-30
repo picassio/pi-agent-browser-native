@@ -158,7 +158,7 @@ export async function packToTemporaryPackageDir(cwd = process.cwd()) {
 		}
 
 		tarballPath = resolve(tempDir, packResult.filename);
-		await execFile(tarCommand, [...(process.platform === "win32" ? ["--force-local"] : []), "-xzf", tarballPath, "-C", tempDir], {
+		await execFile(tarCommand, ["-xzf", tarballPath, "-C", tempDir], {
 			maxBuffer: 5 * 1024 * 1024,
 		});
 

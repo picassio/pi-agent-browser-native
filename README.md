@@ -2,6 +2,8 @@
 
 A Pi extension that lets coding agents drive real browser sessions with a native `agent_browser` tool instead of brittle shell commands.
 
+> **Maintained fork:** `@picassio/pi-agent-browser-native` is the Picassio-maintained fork of [`fitchmultz/pi-agent-browser-native`](https://github.com/fitchmultz/pi-agent-browser-native). It preserves the MIT license and upstream attribution while providing an independently released integration line for Agent Board. Upstream remains configured as the source remote for future synchronization and contributions.
+
 It is for Pi users who want agents to browse sites, inspect pages, click through flows, capture screenshots, use persistent profiles, and handle authenticated web apps without spending context on `agent-browser` CLI ceremony.
 
 ## Source-of-truth map
@@ -17,7 +19,7 @@ Start here for install and common usage. For deeper work, use the active docs by
 | Release gates and targeted upstream support | [`docs/SUPPORT_MATRIX.md`](docs/SUPPORT_MATRIX.md) |
 | Maintainer release process | [`docs/RELEASE.md`](docs/RELEASE.md) |
 
-The complete documentation ownership map lives in the repository source at [`docs/SOURCE_OF_TRUTH.md`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/docs/SOURCE_OF_TRUTH.md).
+The complete documentation ownership map lives in the repository source at [`docs/SOURCE_OF_TRUTH.md`](https://github.com/picassio/pi-agent-browser-native/blob/main/docs/SOURCE_OF_TRUTH.md).
 
 ## What this looks like in Pi
 
@@ -110,7 +112,7 @@ The native tool also gives agents absolute installed-package doc paths in its co
 Then install this Pi package:
 
 ```bash
-pi install npm:pi-agent-browser-native
+pi install npm:@picassio/pi-agent-browser-native
 ```
 
 Start Pi and ask for a browser action:
@@ -122,7 +124,7 @@ Use the agent_browser tool to open https://example.com and then take an interact
 For a one-off trial that does not touch your configured Pi extensions:
 
 ```bash
-pi --no-extensions -e npm:pi-agent-browser-native
+pi --no-extensions -e npm:@picassio/pi-agent-browser-native
 ```
 
 Pi 0.79+ may ask whether to trust the current project before loading project-local instructions, settings, or resources. This extension treats its own project-local package config as developer-trusted by default; use `--no-approve` when you intentionally want Pi and this extension to ignore project-local inputs for that run.
@@ -130,19 +132,19 @@ Pi 0.79+ may ask whether to trust the current project before loading project-loc
 For a specific published version:
 
 ```bash
-pi --no-extensions -e npm:pi-agent-browser-native@<version>
+pi --no-extensions -e npm:@picassio/pi-agent-browser-native@<version>
 ```
 
 To install directly from source instead of npm:
 
 ```bash
-pi install https://github.com/fitchmultz/pi-agent-browser-native
+pi install https://github.com/picassio/pi-agent-browser-native
 ```
 
 For a temporary source trial, keep it isolated from your normal package sources:
 
 ```bash
-pi --no-extensions -e https://github.com/fitchmultz/pi-agent-browser-native
+pi --no-extensions -e https://github.com/picassio/pi-agent-browser-native
 ```
 
 ## First-run health check
@@ -152,7 +154,7 @@ Run the read-only doctor when installing, upgrading, or debugging missing/duplic
 ```bash
 pi-agent-browser-doctor
 # one-off without permanent install:
-npm exec --package pi-agent-browser-native -- pi-agent-browser-doctor
+npm exec --package @picassio/pi-agent-browser-native -- pi-agent-browser-doctor
 # from this checkout:
 npm run doctor
 ```
@@ -174,13 +176,13 @@ It does **not** edit Pi settings and does **not** run upstream `agent-browser do
 - project config: `.pi/config/pi-agent-browser-native/config.json`
 - explicit override: `PI_AGENT_BROWSER_CONFIG=/path/to/config.json`
 
-`pi install npm:pi-agent-browser-native` loads the extension, but it does **not** usually put the package helper on your shell `PATH`. You can configure web search by writing the config file directly, or run the helper through `npm exec` when you want a command to write it for you.
+`pi install npm:@picassio/pi-agent-browser-native` loads the extension, but it does **not** usually put the package helper on your shell `PATH`. You can configure web search by writing the config file directly, or run the helper through `npm exec` when you want a command to write it for you.
 
 Inspect paths/status with the helper when available on `PATH`, or through npm:
 
 ```bash
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config paths
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config show
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config paths
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config show
 ```
 
 The optional `agent_browser_web_search` companion tool is available when a usable Exa or Brave credential source is configured or resolvable from startup config or trusted session config. It is not an `agent_browser` input mode and does not launch a browser; agents may use it whenever current/live external web information helps, then use `agent_browser` when they need page interaction, screenshots, authenticated/profile content, or DOM inspection. Prefer it over automating public search-engine forms such as Google in headless browser jobs: those flows may be redirected to anti-bot or CAPTCHA pages, and this wrapper does not provide or recommend CAPTCHA bypass. If both keys are available, the default provider is Exa because its `/search` endpoint returns agent-friendly highlights and search modes; set `webSearch.preferredProvider` to `"brave"` when you prefer Brave Search.
@@ -208,18 +210,18 @@ JSON
 
 ```bash
 # Store env-var references in global config.
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-env EXA_API_KEY --global
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-env BRAVE_API_KEY --global
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-env EXA_API_KEY --global
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-env BRAVE_API_KEY --global
 
 # Store an env-var reference in project config.
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-env EXA_API_KEY --project
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-env EXA_API_KEY --project
 
 # Prefer Brave when both Exa and Brave keys are available, or clear with "auto".
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config web-search prefer brave --global
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config web-search prefer brave --global
 
 # Disable this package's built-in web-search tool in global config even if API keys are in the environment.
 # Global disable applies to normal runs unless a project config or PI_AGENT_BROWSER_CONFIG override explicitly re-enables it.
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config web-search disable --global
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config web-search disable --global
 
 # Hard-disable web search for one run, regardless of project config, by using the highest-priority override layer.
 cat > /tmp/pi-agent-browser-disable-web-search.json <<'JSON'
@@ -228,10 +230,10 @@ JSON
 PI_AGENT_BROWSER_CONFIG=/tmp/pi-agent-browser-disable-web-search.json pi
 
 # Store a plaintext key in Pi-scoped user config; output stays redacted.
-printf '%s' "$EXA_API_KEY" | npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-key --provider exa --stdin
+printf '%s' "$EXA_API_KEY" | npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-key --provider exa --stdin
 
 # Store a secret-manager command source. Add --project when you want the repo config to own the source.
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-command "op read 'op://Private/Brave Search/API Key'" --provider brave --global
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config web-search set-command "op read 'op://Private/Brave Search/API Key'" --provider brave --global
 ```
 
 Config merges in this order: global → project → `PI_AGENT_BROWSER_CONFIG` override. Under Pi 0.79+, the globally installed or CLI-loaded extension still loads project-local `.pi/config/pi-agent-browser-native/config.json` when Pi trust allows that project layer; it skips that project layer when Pi reports the project is untrusted or when Pi is launched with `--no-approve`. `webSearch.enabled` is evaluated after the loaded layers merge. Use `web-search disable --global` for a user default, `web-search disable --project` for one repo, and a `PI_AGENT_BROWSER_CONFIG` override with `{ "webSearch": { "enabled": false } }` when web search must stay off even if project config exists. Loaded config may use plaintext, custom environment aliases, interpolation literals, malformed-or-late-bound `$` values, and `!command` credential sources; the resolved secret is passed to the provider request while tool content, details, status output, and docs examples stay redacted. `web-search set-key`, `set-command`, and `clear` require `--provider`; `set-env` infers Exa/Brave from `EXA_API_KEY` or `BRAVE_API_KEY` unless you pass `--provider`.
@@ -242,10 +244,10 @@ The same config file can record conservative browser defaults such as a profile 
 
 ```bash
 # Ask the agent to use this profile for signed-in/account-specific work.
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config browser profile set "Profile 1" --policy authenticated-only
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config browser profile set "Profile 1" --policy authenticated-only
 
 # Ask the agent to launch a different Chromium-compatible browser executable.
-npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config browser executable set "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config browser executable set "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
 ```
 
 This adds agent guidance for signed-in/account-specific tasks; current releases do not auto-inject `--profile` or `--executable-path` for every launch. Configure profile/executable guidance globally, in trusted project config, or through `PI_AGENT_BROWSER_CONFIG`. Ask the agent to run `agent_browser` with `args: ["profiles"]` and `args: ["doctor"]` when profile resolution fails. The upstream `profiles` command lists Chrome profiles from Chrome's user data directory; `Default` is not canonical on every machine. Use the displayed profile directory name, a full profile/user-data directory path when upstream accepts one, or a configured `browser.executablePath` plus `sessionMode: "fresh"` for a different Chromium-compatible browser.
@@ -477,7 +479,7 @@ For asynchronous exports, click first and then wait for the download:
 
 When a user gives exact artifact paths for screenshots, recordings, downloads, PDFs, traces, or HAR files, use those paths or explicitly report why the artifact was unavailable; do not silently substitute a different path in the final report. The wrapper creates missing parent directories for direct artifact paths such as `state save`, screenshots, PDFs, downloads, and `wait --download`. For simple loopback `download <selector> <path>` anchor links with HTTP(S) `href`, it can save the in-page response directly to the requested path before falling back to upstream click/download behavior; non-loopback/profile downloads stay upstream-owned. With current upstream `agent-browser`, treat `details.savedFilePath` as upstream-reported metadata and confirm `details.artifacts[].exists` / `details.artifactVerification.verified` before relying on the requested `wait --download <path>` file being present on disk; non-file download payloads such as `data:` URLs are not verified local artifacts.
 
-For evidence-only screenshots or QA captures, branch on `details.artifactVerification` and `details.artifacts` before reporting PASS/FAIL; inline image attachments are optional when size limits allow—do not require vision review unless the user asked for visual inspection. If the latest prompt names exact required artifact paths, browser close can be blocked with `details.promptGuard` until those artifacts are saved and verified.
+For evidence-only screenshots or QA captures, branch on `details.artifactVerification` and `details.artifacts` before reporting PASS/FAIL; inline image attachments are optional when size limits allow—do not require vision review unless the user asked for visual inspection. If the latest prompt explicitly requests exact, literal artifact paths, browser close can be blocked with `details.promptGuard` until those artifacts are saved and verified. Fenced commands, shell-variable or placeholder paths, and Markdown upload/embed examples are not treated as artifact requirements.
 
 Artifact cleanup is host-owned, not a browser command. Close commands (`close`, `quit`, or `exit`) shut down the browser session but do **not** delete explicit screenshots, downloads, PDFs, traces, HAR files, or recordings saved to paths you chose. When the session’s non-empty `details.artifactManifest` is in scope, a successful close command appends a compact `Artifact lifecycle` note and sets `details.artifactCleanup` with the same retention summary as `details.artifactRetentionSummary`, a fixed `note` about host-owned cleanup, and `explicitArtifactPaths`: up to ten distinct paths from manifest rows whose `storageScope` is `explicit-path` (this list can be empty if the recent window only holds spills or other non-explicit inventory). Remove any listed paths with normal file tools after inspection.
 
@@ -593,7 +595,7 @@ The full `npm run verify` gate runs:
 - command-reference baseline checks
 - live command-reference verification against the targeted installed upstream `agent-browser`
 
-Step order and which subprocesses run live in [`scripts/project.mjs`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/scripts/project.mjs); [`test/project-verify.test.ts`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/test/project-verify.test.ts) locks default, `pre-pr`, `release`, `startup-profile`, `real-upstream`, `dogfood`, `platform-target`, `platform-smoke`, `package-pi`, and combined-docs orchestration so a gate cannot disappear accidentally. Run `npm run verify -- --help` for opt-in modes and supported passthrough flags.
+Step order and which subprocesses run live in [`scripts/project.mjs`](https://github.com/picassio/pi-agent-browser-native/blob/main/scripts/project.mjs); [`test/project-verify.test.ts`](https://github.com/picassio/pi-agent-browser-native/blob/main/test/project-verify.test.ts) locks default, `pre-pr`, `release`, `startup-profile`, `real-upstream`, `dogfood`, `platform-target`, `platform-smoke`, `package-pi`, and combined-docs orchestration so a gate cannot disappear accidentally. Run `npm run verify -- --help` for opt-in modes and supported passthrough flags.
 
 For larger local handoffs or PR-ready confidence before expensive release/lifecycle/platform gates, run:
 
@@ -639,7 +641,7 @@ npm run verify -- dogfood
 
 That mode drives the native wrapper through top-level `qa`, `semanticAction`, constrained `job`, screenshot artifact verification, and session close against a deterministic local fixture. It complements, but does not replace, the interactive Pi/tmux release dogfood in [`docs/RELEASE.md`](docs/RELEASE.md#pre-release-checks).
 
-Cross-platform release coverage uses Crabbox to run macOS, Ubuntu Linux, and native Windows target suites; see [`docs/platform-smoke.md`](docs/platform-smoke.md) for the required matrix, standalone coverage (`npm run smoke:platform:all` and per-target `smoke:platform:macos` / `:ubuntu` / `:windows-native`), and artifact/lease inspection. The release gate is:
+Cross-platform release coverage runs the platform-local package gate and deterministic browser dogfood on GitHub-hosted macOS, Ubuntu Linux, and native Windows runners. Maintainers can additionally use Crabbox for persistent target/snapshot coverage; see [`docs/platform-smoke.md`](docs/platform-smoke.md) for standalone commands and artifact/lease inspection. The deepest local gate remains:
 
 ```bash
 npm run doctor
@@ -649,7 +651,7 @@ npm run smoke:platform:doctor
 npm run verify -- release
 ```
 
-`npm run verify -- release` includes the default verification gate, packaged Pi smoke coverage, and the release-blocking Crabbox platform matrix (the same matrix `npm run smoke:platform:all` runs standalone). For the full maintainer release flow, follow [`docs/RELEASE.md`](docs/RELEASE.md). The package also has a `prepublishOnly` hook that runs the same release gate and `npm pack --dry-run` during `npm publish`.
+`npm run verify -- release` includes the default verification gate, configured-source lifecycle, packaged Pi smoke, and the Crabbox platform matrix. The canonical fork publication path is `.github/workflows/publish.yml`: its required CI workflow runs native macOS/Ubuntu/Windows gates before the publish job. `prepublishOnly` independently reruns `verify -- pre-pr` plus `npm pack --dry-run`, so a publish cannot omit core/package verification even after the hosted matrix succeeds. For the full maintainer flow, follow [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## How it works
 
@@ -689,7 +691,7 @@ Use the npm version declared in `package.json` `packageManager` when refreshing 
 Quick isolated checkout smoke test:
 
 ```bash
-pi --approve --no-extensions -e .
+pi --approve --no-extensions -e ./extensions/agent-browser/index.ts
 ```
 
 This bypasses Pi settings and configured extensions while explicitly trusting this checkout's project-local inputs for the run. Omit `--approve` when you want to exercise Pi's interactive Project Trust prompt instead. After editing extension code, restart that Pi process to test the new checkout.
@@ -710,7 +712,7 @@ Installed-package validation after publish:
 
 ```bash
 npm run verify -- package-pi
-pi --no-extensions -e npm:pi-agent-browser-native@<version>
+pi --no-extensions -e npm:@picassio/pi-agent-browser-native@<version>
 ```
 
 ## Generated native-tool playbook notes
@@ -751,23 +753,25 @@ These calls return plain text and stay stateless: the extension does not inject 
 | `docs/ARCHITECTURE.md` | Design decisions and implementation structure |
 | `docs/REQUIREMENTS.md` | Product requirements and constraints |
 | `docs/RELEASE.md` | Release, package, and lifecycle verification workflow |
+| `docs/SECURITY.md` | Dependency audit policy and accepted development-only advisory exceptions |
 | `docs/platform-smoke.md` | Crabbox macOS, Ubuntu, and native Windows release gate |
 | `docs/SUPPORT_MATRIX.md` | Current upstream support audit and release-readiness matrix |
 | `test/` | Wrapper, runtime, presentation, lifecycle, and package tests |
 
 ## More docs
 
-- [`AGENTS.md`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/AGENTS.md) — maintainer and agent runbooks, including upstream capability baseline rebaselining and Pi smoke testing in `tmux`
+- [`AGENTS.md`](https://github.com/picassio/pi-agent-browser-native/blob/main/AGENTS.md) — maintainer and agent runbooks, including upstream capability baseline rebaselining and Pi smoke testing in `tmux`
 - [`docs/COMMAND_REFERENCE.md`](docs/COMMAND_REFERENCE.md) — full native command reference and upstream capability baseline
 - [`docs/TOOL_CONTRACT.md`](docs/TOOL_CONTRACT.md) — exact tool contract
 - [`docs/ELECTRON.md`](docs/ELECTRON.md) — Electron desktop-app guide
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the wrapper is designed
 - [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — product constraints and non-goals
 - [`docs/RELEASE.md`](docs/RELEASE.md) — maintainer release workflow
+- [`docs/SECURITY.md`](docs/SECURITY.md) — dependency audit policy and accepted development-only advisory exceptions
 - [`docs/SUPPORT_MATRIX.md`](docs/SUPPORT_MATRIX.md) — current upstream support matrix and closure evidence
 
 ## Where to go next
 
 If you are a user, install the package and ask Pi to open a public page with `agent_browser`.
 
-If you are evaluating the implementation, read [`extensions/agent-browser/index.ts`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/extensions/agent-browser/index.ts), then run `npm run verify`.
+If you are evaluating the implementation, read [`extensions/agent-browser/index.ts`](https://github.com/picassio/pi-agent-browser-native/blob/main/extensions/agent-browser/index.ts), then run `npm run verify`.

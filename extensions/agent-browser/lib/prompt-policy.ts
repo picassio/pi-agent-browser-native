@@ -32,6 +32,17 @@ const LEGACY_BASH_ALLOW_PATTERNS = [
 ];
 
 const PROMPT_ARTIFACT_PATH_PATTERN = /(?:^|[\s"'`(:])((?:\/[^\s"'`),;]+|[A-Za-z]:[\\/][^\s"'`),;]+|\.{1,2}[\\/][^\s"'`),;]+|[^\s"'`),;:\\/]+(?:[\\/][^\s"'`),;]+)+|[^\s"'`),;:\\/]+)\.(?:png|jpe?g|webp|gif|webm|mp4|har|pdf|trace|json))(?:[\s"'`),;.]|$)/gi;
+const PROMPT_ARTIFACT_REQUEST_PATTERN = /(?:\b(?:save|capture|take|write|store|produce|create)\b[^.!?]*\b(?:screenshots?|screen\s+recordings?|recordings?|videos?)\b|\b(?:required\s+)?(?:screenshots?|screen\s+recordings?|recordings?|videos?)(?:\s+(?:path|file))?\s*(?:here\s*)?(?::|=|\bto\b|\bat\b))/i;
+const INSTRUCTIONAL_ARTIFACT_LINE_PATTERN = /(?:^\s*(?:(?:[-*]\s*)?[❌✅]?\s*)?(?:(?:malformed\s+)?example|wrong|right)\s*:|\b(?:as an?|for(?: an?)?) example\b|!\[[^\n]*\]\s*\()/i;
+const MARKDOWN_FENCE_PATTERN = /^\s*(`{3,}|~{3,})/;
+
+function getPromptArtifactCandidateContext(line: string, pathStart: number, pathEnd: number): string {
+	const prefix = line.slice(0, pathStart);
+	const boundaries = [...prefix.matchAll(/[.!?;]\s+/g)];
+	const lastBoundary = boundaries.at(-1);
+	const contextStart = lastBoundary ? (lastBoundary.index ?? 0) + lastBoundary[0].length : 0;
+	return line.slice(contextStart, pathEnd);
+}
 
 function inferPromptArtifactKind(line: string, path: string): PromptRequestedArtifact["kind"] | undefined {
 	const lowerPath = path.toLowerCase();
@@ -46,11 +57,24 @@ function inferPromptArtifactKind(line: string, path: string): PromptRequestedArt
 function extractPromptRequestedArtifacts(prompt: string): PromptRequestedArtifact[] {
 	const artifacts: PromptRequestedArtifact[] = [];
 	const seen = new Set<string>();
+	let fenceMarker: "`" | "~" | undefined;
 	for (const line of prompt.split(/\r?\n/)) {
+		const fenceMatch = MARKDOWN_FENCE_PATTERN.exec(line);
+		if (fenceMatch) {
+			const marker = fenceMatch[1]?.[0] as "`" | "~";
+			if (!fenceMarker) fenceMarker = marker;
+			else if (fenceMarker === marker) fenceMarker = undefined;
+			continue;
+		}
+		if (fenceMarker) continue;
+
 		PROMPT_ARTIFACT_PATH_PATTERN.lastIndex = 0;
 		for (const match of line.matchAll(PROMPT_ARTIFACT_PATH_PATTERN)) {
 			const path = match[1]?.trim();
-			if (!path) continue;
+			if (!path || /^[~$]/.test(path) || /[<>{}\[\]]|\/api\/files\//i.test(path)) continue;
+			const pathStart = (match.index ?? 0) + match[0].indexOf(path);
+			const context = getPromptArtifactCandidateContext(line, pathStart, pathStart + path.length);
+			if (INSTRUCTIONAL_ARTIFACT_LINE_PATTERN.test(context) || !PROMPT_ARTIFACT_REQUEST_PATTERN.test(context)) continue;
 			const kind = inferPromptArtifactKind(line, path);
 			if (!kind) continue;
 			const key = `${kind}:${path}`;
