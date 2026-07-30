@@ -85,6 +85,11 @@ Save the required screenshot to /tmp/actual-evidence.png before closing.`);
 	assert.deepEqual(policy.requestedArtifacts, [
 		{ kind: "screenshot", path: "/tmp/actual-evidence.png", required: true },
 	]);
+
+	const collapsedPolicy = buildPromptPolicy("Save a screenshot here: /tmp/collapsed-evidence.png. Right: ![Example](/api/files/daredevil/example.png)");
+	assert.deepEqual(collapsedPolicy.requestedArtifacts, [
+		{ kind: "screenshot", path: "/tmp/collapsed-evidence.png", required: true },
+	]);
 });
 
 test("shouldAppendBrowserSystemPrompt only targets clearly browser-oriented prompts", () => {
