@@ -1,6 +1,6 @@
 {
-  "name": "pi-agent-browser-native",
-  "version": "0.2.72",
+  "name": "@picassio/pi-agent-browser-native",
+  "version": "0.2.73",
   "description": "pi extension that exposes agent-browser as a native tool for browser automation",
   "type": "module",
   "author": "Mitch Fultz (https://github.com/fitchmultz)",
@@ -17,11 +17,15 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fitchmultz/pi-agent-browser-native.git"
+    "url": "git+https://github.com/picassio/pi-agent-browser-native.git"
   },
-  "homepage": "https://github.com/fitchmultz/pi-agent-browser-native#readme",
+  "homepage": "https://github.com/picassio/pi-agent-browser-native#readme",
   "bugs": {
-    "url": "https://github.com/fitchmultz/pi-agent-browser-native/issues"
+    "url": "https://github.com/picassio/pi-agent-browser-native/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "engines": {
     "node": ">=22.19.0"
@@ -92,7 +96,7 @@
     "typecheck": "node ./scripts/project.mjs verify typecheck",
     "test": "node ./scripts/build.mjs && tsx --test --test-concurrency=1 test/**/*.test.ts",
     "verify": "node ./scripts/project.mjs verify",
-    "prepublishOnly": "npm run verify -- release && npm pack --dry-run",
+    "prepublishOnly": "npm run verify -- pre-pr && npm pack --dry-run",
     "build": "node ./scripts/build.mjs",
     "startup-profile": "node ./scripts/profile-startup.mjs",
     "prepare": "node ./scripts/prepare.mjs"

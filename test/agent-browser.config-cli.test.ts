@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 const CONFIG_SCRIPT = join(process.cwd(), "scripts", "config.mjs");
-const DOCUMENTED_CONFIG_HELPER_PREFIX = "npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config";
+const DOCUMENTED_CONFIG_HELPER_PREFIX = "npm exec --yes --package @picassio/pi-agent-browser-native@latest -- pi-agent-browser-config";
 const LOCAL_PACKAGE_SPEC = process.cwd();
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
 
@@ -128,7 +128,7 @@ function documentedNpmExecArgs(command: string): { args: string[]; input?: strin
 	assert.equal(tokens[0], "npm", `documented command must start with npm exec: ${command}`);
 	const packageIndex = tokens.indexOf("--package");
 	assert.notEqual(packageIndex, -1, `documented command must use --package: ${command}`);
-	assert.equal(tokens[packageIndex + 1], "pi-agent-browser-native@latest", `documented command must use the published package spec: ${command}`);
+	assert.equal(tokens[packageIndex + 1], "@picassio/pi-agent-browser-native@latest", `documented command must use the published package spec: ${command}`);
 	tokens[packageIndex + 1] = LOCAL_PACKAGE_SPEC;
 	return { args: tokens.slice(1), input };
 }

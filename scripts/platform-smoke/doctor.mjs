@@ -232,7 +232,8 @@ function checkAgentBrowserVersion(expectedVersion, failures, command = "agent-br
 
 export async function runDoctor(config) {
 	const failures = { count: 0 };
-	const packageName = config?.packageName ?? "pi-agent-browser-native";
+	const packageName = config?.packageName ?? "@picassio/pi-agent-browser-native";
+	const packageSlug = config?.packageSlug ?? String(packageName).replace(/^@/, "").replace(/[^A-Za-z0-9._-]+/g, "-");
 	const artifactRoot = config?.artifactRoot ?? ".artifacts/platform-smoke";
 	const nodeMajor = config?.nodeValidationMajor ?? 22;
 	const agentBrowserVersion = config?.agentBrowserVersion;
@@ -293,7 +294,7 @@ export async function runDoctor(config) {
 		const macUser = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
 		const macHost = env("PLATFORM_SMOKE_MAC_HOST") || config?.macos?.host || "localhost";
 		const macPort = String(env("PLATFORM_SMOKE_MAC_PORT") || config?.macos?.port || 22);
-		const macRoot = env("PLATFORM_SMOKE_MAC_WORK_ROOT") || config?.macos?.workRoot || `/Users/${macUser}/crabbox/${packageName}`;
+		const macRoot = env("PLATFORM_SMOKE_MAC_WORK_ROOT") || config?.macos?.workRoot || `/Users/${macUser}/crabbox/${packageSlug}`;
 		checkCrabboxProvider(cbox, ["--provider", "ssh", "--target", "macos", "--static-host", macHost, "--static-user", macUser, "--static-port", macPort, "--static-work-root", macRoot], "macOS ssh", failures);
 	}
 
@@ -325,7 +326,7 @@ export async function runDoctor(config) {
 			const vmName = env("PLATFORM_SMOKE_WINDOWS_VM") || config?.windowsParallels?.sourceVm || "pi-extension-windows-template";
 			const snapshot = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || config?.windowsParallels?.snapshot || "crabbox-ready";
 			const user = env("PLATFORM_SMOKE_WINDOWS_USER") || config?.windowsParallels?.user || env("USER");
-			const workRoot = env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") || config?.windowsParallels?.workRoot || `C:\\crabbox\\${packageName}`;
+			const workRoot = env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") || config?.windowsParallels?.workRoot || `C:\\crabbox\\${packageSlug}`;
 			const list = shell("prlctl list -a --no-header 2>/dev/null");
 			if (!list) {
 				fail("prlctl list returned no VMs", failures);

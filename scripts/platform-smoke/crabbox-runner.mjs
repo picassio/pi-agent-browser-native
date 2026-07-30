@@ -15,7 +15,9 @@ export function crabboxBin() {
 }
 
 function packageSlug(config = {}) {
-	return process.env.PLATFORM_SMOKE_PACKAGE_SLUG || config.packageName || "pi-agent-browser-native";
+	return process.env.PLATFORM_SMOKE_PACKAGE_SLUG
+		|| config.packageSlug
+		|| String(config.packageName ?? "@picassio/pi-agent-browser-native").replace(/^@/, "").replace(/[^A-Za-z0-9._-]+/g, "-");
 }
 
 export function describeTarget(targetName, config = {}) {

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.73 - 2026-07-30
+
+### Changed
+
+- Established the Picassio-maintained fork and scoped public package `@picassio/pi-agent-browser-native`, preserving the upstream MIT license, attribution, configuration directory, helper binaries, and legacy-source detection.
+- Added protected GitHub CI and tag publication workflows. Exact tags require core/package verification plus native macOS, Ubuntu, and Windows platform-local/browser-dogfood jobs before npm publication.
+- Corrected checkout-loaded Pi guidance to use the explicit source entrypoint and documented the bounded development-only dependency-audit exception.
+
+### Fixed
+
+- Accepted visible text under `display: contents` ancestors while retaining hidden/display/opacity exclusions.
+- Made cold-start verification resilient to positive scheduler jitter without raising the strict 250 ms boundary.
+- Preserved stdout byte ordering when oversized output crosses into asynchronous spill storage.
+- Kept the compiled `dist/` entrypoint readable throughout overlapping atomic build publication.
+- Ignored illustrative prompt artifact paths while preserving genuine collapsed-line artifact requirements.
+- Reported structured `found: false` evidence when an Electron launch timeout occurs before the first DevTools port-file poll.
+- Bounded generated fresh managed-session names to the upstream Unix socket-path ceiling.
+- Added installed-package coverage proving output-path getters preserve the active managed page.
+
+### Validation
+
+- Passed the complete default gate on Node 24.13.0 / npm 11.14.0: 599 tests passed, 0 failed, and 2 opt-in tests skipped; generated docs and the live agent-browser 0.33.0 command-reference check passed.
+- Passed packaged Pi verification (117 files), deterministic seven-step real-browser dogfood, configured-source lifecycle with `openrouter/google/gemini-2.5-flash`, production dependency audit with zero findings, and ten-sample startup profiling (227.7 ms best against the strict 250 ms boundary).
+- The exact branch/tag still requires the hosted macOS/Ubuntu/Windows CI matrix before publication.
+
 ## 0.2.72 - 2026-07-23
 
 ### Changed

@@ -4,7 +4,7 @@ import { join } from "node:path";
 const DIRECT_AGENT_BROWSER_BASH_BYPASS_ENV = "PI_AGENT_BROWSER_ALLOW_DIRECT_BASH";
 const DIRECT_AGENT_BROWSER_EXECUTABLE_PATTERN = /^(?:[.~]|\.\.?|\/)?(?:[^\s;&|]+\/)?agent-browser$/;
 const HARMLESS_AGENT_BROWSER_INSPECTION_PATTERN = /^\s*(?:command\s+-v|which|type\s+-P)\s+agent-browser\s*$/;
-const PACKAGE_NAME = "pi-agent-browser-native";
+const PACKAGE_NAMES = new Set(["@picassio/pi-agent-browser-native", "pi-agent-browser-native"]);
 
 type ShellQuoteState = "double" | "single" | undefined;
 
@@ -194,7 +194,7 @@ function isTruthyEnvValue(value: string | undefined): boolean {
 async function isPackageDevelopmentCwd(cwd: string): Promise<boolean> {
 	try {
 		const packageJson = JSON.parse(await readFile(join(cwd, "package.json"), "utf8")) as { name?: unknown };
-		return packageJson.name === PACKAGE_NAME;
+		return typeof packageJson.name === "string" && PACKAGE_NAMES.has(packageJson.name);
 	} catch {
 		return false;
 	}

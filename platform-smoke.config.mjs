@@ -7,7 +7,8 @@ const PLATFORM_SMOKE_AGENT_BROWSER_VERSION = CAPABILITY_BASELINE.targetVersion;
 const PLATFORM_SMOKE_UBUNTU_IMAGE = `pi-agent-browser-native-platform:node24-agent-browser${PLATFORM_SMOKE_AGENT_BROWSER_VERSION}`;
 
 export default {
-	packageName: "pi-agent-browser-native",
+	packageName: "@picassio/pi-agent-browser-native",
+	packageSlug: "picassio-pi-agent-browser-native",
 	artifactRoot: ".artifacts/platform-smoke",
 	requiredTargets: ["macos", "ubuntu", "windows-native"],
 	requiredSuites: ["platform-build", "browser-dogfood-smoke"],

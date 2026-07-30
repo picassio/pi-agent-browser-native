@@ -75,6 +75,7 @@ const result = {
   crabboxMinVersion: config.requiredCrabbox.minVersion,
   nodeValidationMajor: config.nodeValidationMajor,
   packageName: config.packageName,
+  packageSlug: config.packageSlug,
   privateConstantsExported: "PLATFORM_SMOKE_AGENT_BROWSER_VERSION" in configModule || "PLATFORM_SMOKE_UBUNTU_IMAGE" in configModule,
   ubuntuContainerImage: config.ubuntuContainerImage,
   windowsSourceVm: config.windowsParallels.sourceVm,
@@ -83,7 +84,7 @@ const result = {
   targets: config.requiredTargets,
 };
 console.log(JSON.stringify(result));
-if (result.packageName !== "pi-agent-browser-native" || result.privateConstantsExported) process.exit(1);
+if (result.packageName !== "@picassio/pi-agent-browser-native" || result.packageSlug !== "picassio-pi-agent-browser-native" || result.privateConstantsExported) process.exit(1);
 if (result.crabboxMinVersion !== "0.26.0") process.exit(1);
 if (result.nodeValidationMajor !== 22) process.exit(1);
 if (!result.ubuntuContainerImage.includes("agent-browser" + result.agentBrowserVersion)) process.exit(1);
@@ -101,9 +102,10 @@ test("platform command rendering uses POSIX and PowerShell without source-extens
 import { readFileSync } from "node:fs";
 import { CAPABILITY_BASELINE } from "./scripts/agent-browser-capability-baseline.mjs";
 import { buildBrowserDogfoodCommand, buildPlatformBuildCommand, platformFor } from "./scripts/platform-smoke/targets.mjs";
-const posix = buildPlatformBuildCommand("ubuntu", "pi-agent-browser-native", 22);
-const macos = buildPlatformBuildCommand("macos", "pi-agent-browser-native", 22);
-const powershell = buildPlatformBuildCommand("windows-native", "pi-agent-browser-native", 22);
+const packageName = "@picassio/pi-agent-browser-native";
+const posix = buildPlatformBuildCommand("ubuntu", packageName, 22);
+const macos = buildPlatformBuildCommand("macos", packageName, 22);
+const powershell = buildPlatformBuildCommand("windows-native", packageName, 22);
 const powershellScript = readFileSync("scripts/platform-smoke/platform-build-windows.ps1", "utf8");
 const dogfoodPosix = buildBrowserDogfoodCommand("ubuntu");
 const dogfoodWindows = buildBrowserDogfoodCommand("windows-native");
@@ -113,13 +115,13 @@ const result = {
   ubuntuPlatform: platformFor("ubuntu") === "posix",
   windowsPlatform: platformFor("windows-native") === "powershell",
   posixHasVerify: posix.includes("npm run verify -- platform-target"),
-  posixHasPackedInstall: posix.includes("install -l --approve ./node_modules/pi-agent-browser-native"),
+  posixHasPackedInstall: posix.includes("install -l --approve ./node_modules/@picassio/pi-agent-browser-native"),
   posixHasApprovedList: posix.includes("list --approve"),
   posixNoExtensionShortcut: !/\bpi\s+(?:-e|--extension)\s+\./.test(posix),
   posixNoFixtureCopy: !posix.includes("cp -R src prompts"),
   macosHasVerify: macos.includes("npm run verify -- platform-target"),
   powershellUsesScript: powershell.includes("platform-build-windows.ps1"),
-  powershellHasPackage: powershell.includes("pi-agent-browser-native"),
+  powershellHasPackage: powershell.includes("@picassio/pi-agent-browser-native"),
   powershellHasApprovedPackageCommands: powershellScript.includes("install -l --approve") && powershellScript.includes("list --approve"),
   powershellNoExtensionShortcut: !/\bpi\s+(?:-e|--extension)\s+\./.test(powershell),
   dogfoodRunsScript: dogfoodPosix.includes("verify-agent-browser-dogfood.ts"),
@@ -152,13 +154,14 @@ try {
   mkdirSync(suiteDir, { recursive: true });
   writeFileSync(join(suiteDir, "present.txt"), "ok");
   const manifest = writeManifest(suiteDir, ["artifact-manifest.json", "present.txt", "missing.txt"]);
-  const cleanup = createLeaseCleanupFailureResult({ artifactRoot: root, packageName: "pi-agent-browser-native" }, "ubuntu", "cbx_failed", {
+  const packageConfig = { artifactRoot: root, packageName: "@picassio/pi-agent-browser-native", packageSlug: "picassio-pi-agent-browser-native" };
+  const cleanup = createLeaseCleanupFailureResult(packageConfig, "ubuntu", "cbx_failed", {
     stdout: "",
     stderr: "stop failed",
     code: 1,
     signal: null,
   });
-  const cleanupSuccess = createLeaseCleanupResult({ artifactRoot: root, packageName: "pi-agent-browser-native" }, "ubuntu", "cbx_ok", {
+  const cleanupSuccess = createLeaseCleanupResult(packageConfig, "ubuntu", "cbx_ok", {
     stdout: "stopped",
     stderr: "",
     code: 0,
@@ -169,7 +172,7 @@ try {
     code: 0,
     signal: null,
   });
-  const warmupFailure = createLeaseWarmupFailureResult({ artifactRoot: root, packageName: "pi-agent-browser-native" }, "ubuntu", {
+  const warmupFailure = createLeaseWarmupFailureResult(packageConfig, "ubuntu", {
     stdout: "",
     stderr: "warmup failed",
     code: 1,
@@ -187,7 +190,7 @@ try {
     cleanupOk: cleanup.ok,
     cleanupSuccessOk: cleanupSuccess.ok,
     cleanupSuccessRecorded: successManifest.present.includes("crabbox.stop.stdout.txt") && successManifest.present.includes("crabbox.cleanup.stdout.txt"),
-    cleanupTargetMetadata: successTarget.packageName === "pi-agent-browser-native" && successTarget.crabbox.provider === "local-container" && successTarget.crabbox.workRoot === "/work/crabbox",
+    cleanupTargetMetadata: successTarget.packageName === "@picassio/pi-agent-browser-native" && successTarget.slug === "picassio-pi-agent-browser-native-ubuntu" && successTarget.crabbox.provider === "local-container" && successTarget.crabbox.workRoot === "/work/crabbox",
     warmupFailureRecorded: warmupFailure.ok === false && readFileSync(join(warmupFailure.suiteDir, "failures.md"), "utf8").includes("lease-warmup"),
     assertionsOk: assertions.ok,
     leaseCleanupFailed: assertions.checks.some((check) => check.id === "lease-cleanup" && check.ok === false),
