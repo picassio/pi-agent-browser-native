@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
-import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
@@ -382,6 +382,79 @@ test("runAgentBrowserProcess removes abort listeners after repeated successful r
 			assert.equal(processResult.aborted, false);
 			assert.equal(getEventListeners(controller.signal, "abort").length, 0);
 		}
+	} finally {
+		await rm(tempDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+	}
+});
+
+test("runAgentBrowserProcess continues when the requested cwd was removed", async () => {
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-deleted-cwd-"));
+	const binaryDir = join(tempDir, "bin");
+	const deletedCwd = join(tempDir, "removed-worktree");
+	const basePath = process.env.PATH ?? "";
+	await Promise.all([
+		mkdir(binaryDir),
+		mkdir(deletedCwd),
+	]);
+	await writeFakeAgentBrowserBinary(
+		binaryDir,
+		`process.stdout.write(JSON.stringify({ success: true, data: { continued: true } }));`,
+	);
+	await rm(deletedCwd, { recursive: true });
+
+	try {
+		const processResult = await runAgentBrowserProcess({
+			args: ["snapshot"],
+			cwd: deletedCwd,
+			env: { PATH: `${binaryDir}${delimiter}${basePath}` },
+		});
+
+		assert.equal(processResult.exitCode, 0);
+		assert.equal(processResult.spawnError, undefined);
+		assert.match(processResult.stdout, /"continued":true/);
+	} finally {
+		await rm(tempDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+	}
+});
+
+test("agentBrowserExtension preserves consecutive managed-session commands after its cwd is removed", { concurrency: false }, async () => {
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-deleted-cwd-extension-"));
+	const binaryDir = join(tempDir, "bin");
+	const deletedCwd = join(tempDir, "removed-worktree");
+	const basePath = process.env.PATH ?? "";
+	await Promise.all([
+		mkdir(binaryDir),
+		mkdir(deletedCwd),
+	]);
+	await writeFakeAgentBrowserBinary(
+		binaryDir,
+		`const args = process.argv.slice(2);
+if (args.includes("open")) {
+	process.stdout.write(JSON.stringify({ success: true, data: { title: "VeeFood", url: "http://10.88.1.8/" } }));
+} else {
+	process.stdout.write(JSON.stringify({ success: true, data: { origin: "http://10.88.1.8/", refs: {}, snapshot: "" } }));
+}`,
+	);
+
+	try {
+		await withPatchedEnv({ PATH: `${binaryDir}${delimiter}${basePath}` }, async () => {
+			const harness = createExtensionHarness({ cwd: deletedCwd });
+			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+			const firstResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: ["open", "http://10.88.1.8/"],
+			});
+			assert.equal(firstResult.isError, false, JSON.stringify(firstResult));
+			const sessionName = firstResult.details?.sessionName;
+
+			await rm(deletedCwd, { recursive: true });
+			const secondResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: ["snapshot", "-i"],
+			});
+
+			assert.equal(secondResult.isError, false, JSON.stringify(secondResult));
+			assert.equal(secondResult.details?.sessionName, sessionName);
+			assert.notEqual(secondResult.details?.failureCategory, "missing-binary");
+		});
 	} finally {
 		await rm(tempDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
 	}

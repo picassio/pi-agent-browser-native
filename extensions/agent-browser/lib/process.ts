@@ -7,7 +7,7 @@
  */
 
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { chmod, mkdir } from "node:fs/promises";
+import { chmod, mkdir, stat } from "node:fs/promises";
 import { env as processEnv, platform as processPlatform } from "node:process";
 
 import { GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES, GLOBAL_VALUE_FLAGS, getFlagName } from "./argv-grammar.js";
@@ -237,6 +237,15 @@ export function buildAgentBrowserProcessEnv(
 	return childEnv;
 }
 
+async function resolveAgentBrowserSpawnCwd(cwd: string): Promise<string | undefined> {
+	try {
+		await stat(cwd);
+		return cwd;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "ENOENT" ? undefined : cwd;
+	}
+}
+
 export async function runAgentBrowserProcess(options: {
 	args: string[];
 	cwd: string;
@@ -246,6 +255,7 @@ export async function runAgentBrowserProcess(options: {
 	timeoutMs?: number;
 }): Promise<ProcessRunResult> {
 	const { args, cwd, env, signal, stdin } = options;
+	const spawnCwd = await resolveAgentBrowserSpawnCwd(cwd);
 	const timeoutMs = options.timeoutMs ?? getAgentBrowserProcessTimeoutMs();
 	const processOverrides: NodeJS.ProcessEnv = {
 		[AGENT_BROWSER_IDLE_TIMEOUT_ENV]: String(getImplicitSessionIdleTimeoutMs()),
@@ -350,7 +360,7 @@ export async function runAgentBrowserProcess(options: {
 
 		const spawnCommand = buildAgentBrowserSpawnCommand(args);
 		const child = spawn(spawnCommand.command, spawnCommand.args, {
-			cwd,
+			cwd: spawnCwd,
 			env: buildAgentBrowserProcessEnv(processEnv, effectiveEnv),
 			stdio: ["pipe", "pipe", "pipe"],
 		});
