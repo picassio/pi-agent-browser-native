@@ -1,13 +1,3 @@
-/**
- * Purpose: Build safe, deterministic agent-browser invocations and persisted session state for the pi-agent-browser extension.
- * Responsibilities: Validate raw tool arguments, derive extension-managed session names from the pi session identity, restore managed-session state from persisted tool details, redact sensitive invocation text, classify browser-oriented prompts, and build the effective CLI argument list passed to the upstream agent-browser binary.
- * Scope: Pure runtime-planning helpers only; no subprocess execution or filesystem access lives here.
- * Usage: Imported by the extension entrypoint and unit tests before spawning the upstream CLI.
- * Invariants/Assumptions: The wrapper stays thin, preserves upstream command vocabulary, keeps plain-text inspection stateless,
- * and only injects wrapper-owned flags: `--json`, an extension-managed `--session` when appropriate, and the narrow
- * OpenAI/ChatGPT headless compatibility `--user-agent` when that workaround applies.
- */
-
 import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
 
@@ -18,20 +8,38 @@ import {
 	type CommandInfo,
 } from "./argv-descriptor.js";
 import {
+	canonicalizeAgentBrowserNamespace,
+	extractExplicitNamespace,
+	extractExplicitSessionName,
+	getAgentBrowserSessionIdentityKey,
+	getBooleanFlagValue,
 	GLOBAL_VALUE_FLAGS_ALLOWING_DASH_VALUE,
+	isUpstreamEnvFlagEnabled,
 	PREVALIDATED_VALUE_FLAGS,
-	optionalGlobalValueFlagConsumesNext,
+	resolveAgentBrowserNamespace,
+	scanUpstreamGlobalFlagOccurrences,
 } from "./argv-grammar.js";
 import { needsManagedSession } from "./command-policy.js";
+import { isWrapperManagedSessionName, redactManagedSessionRestoreKeys } from "./managed-session-capabilities.js";
 import { isCloseCommand, isOpenNavigationCommand } from "./command-taxonomy.js";
-import { LAUNCH_SCOPED_FLAG_DEFINITIONS, LAUNCH_SCOPED_FLAG_LABEL } from "./launch-scoped-flags.js";
+import {
+	hasLaunchScopedFlagToken,
+	LAUNCH_SCOPED_FLAG_DEFINITIONS,
+	LAUNCH_SCOPED_FLAG_LABEL,
+} from "./launch-scoped-flags.js";
+import {
+	MANAGED_SESSION_NAME_PREFIX,
+	type ManagedSessionRestoreIdentity,
+} from "./managed-session-restore.js";
 
 export type { CommandInfo } from "./argv-descriptor.js";
 export { extractCommandTokens, findCommandStartIndex, parseArgvDescriptor, parseCommandInfo } from "./argv-descriptor.js";
 
 import { isRecord } from "./parsing.js";
+import { getAgentBrowserProcessEnvironment } from "./process-environment.js";
 
 const OPENAI_HEADLESS_COMPAT_HOSTS = new Set(["chat.com", "chat.openai.com", "chatgpt.com"]);
+const CLOUDFLARE_HEADLESS_COMPAT_HOST = "dash.cloudflare.com";
 const AGENT_BROWSER_IDLE_TIMEOUT_ENV = "AGENT_BROWSER_IDLE_TIMEOUT_MS";
 const IMPLICIT_SESSION_IDLE_TIMEOUT_ENV = "PI_AGENT_BROWSER_IMPLICIT_SESSION_IDLE_TIMEOUT_MS";
 const IMPLICIT_SESSION_CLOSE_TIMEOUT_ENV = "PI_AGENT_BROWSER_IMPLICIT_SESSION_CLOSE_TIMEOUT_MS";
@@ -74,7 +82,7 @@ export interface InvalidValueFlagDetails {
 }
 
 export interface CompatibilityWorkaround {
-	id: "chatgpt-headless-user-agent";
+	id: "chatgpt-headless-user-agent" | "cloudflare-headless-user-agent";
 	reason: string;
 }
 
@@ -110,6 +118,7 @@ export interface ManagedSessionState {
 export interface RestoredManagedSessionState extends ManagedSessionState {
 	closedSessionName?: string;
 	freshSessionOrdinal: number;
+	managedSessionRestoreDisabledIdentities: ManagedSessionRestoreIdentity[];
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -312,7 +321,7 @@ export function redactSensitiveText(text: string): string {
 	return redactEmbeddedStructuredText(
 		redactEnvSecretAssignments(
 			redactStandaloneBasicCredential(
-				redactBearerCredentials(redactLooseUrlUserinfo(redactLooseUrlMatches(text)))
+				redactBearerCredentials(redactLooseUrlUserinfo(redactLooseUrlMatches(redactManagedSessionRestoreKeys(text))))
 					.replace(/\b(Authorization\s*:\s*Basic)\s+[^\s",]+/gi, "$1 [REDACTED]")
 					.replace(/\b(Cookie|Set-Cookie)\s*:\s*[^\n\r"]+/gi, "$1: [REDACTED]"),
 			),
@@ -419,13 +428,29 @@ function parseTimeoutMs(rawValue: string | undefined, minimumValue: number): num
 	return parsedValue;
 }
 
-export function getImplicitSessionIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+export function getImplicitSessionIdleTimeoutMs(env: NodeJS.ProcessEnv = getAgentBrowserProcessEnvironment()): number {
 	return parseTimeoutMs(env[IMPLICIT_SESSION_IDLE_TIMEOUT_ENV], 0) ??
 		parseTimeoutMs(env[AGENT_BROWSER_IDLE_TIMEOUT_ENV], 0) ??
 		DEFAULT_IMPLICIT_SESSION_IDLE_TIMEOUT_MS;
 }
 
-export function getImplicitSessionCloseTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+function countExplicitGlobalFlags(args: string[], targetFlag: "--namespace" | "--session"): number {
+	return scanUpstreamGlobalFlagOccurrences(args, targetFlag).length;
+}
+
+function getUnsupportedLeadingIdentityAssignment(args: string[]): "--namespace" | "--session" | undefined {
+	const commandStartIndex = findCommandStartIndex(args) ?? args.length;
+	for (let index = 0; index < commandStartIndex; index += 1) {
+		const token = args[index];
+		if (token.startsWith("--session=")) return "--session";
+		if (token.startsWith("--namespace=")) return "--namespace";
+		const flag = token.split("=", 1)[0] ?? token;
+		if (!token.includes("=") && PREVALIDATED_VALUE_FLAGS.has(flag)) index += 1;
+	}
+	return undefined;
+}
+
+export function getImplicitSessionCloseTimeoutMs(env: NodeJS.ProcessEnv = getAgentBrowserProcessEnvironment()): number {
 	return parseTimeoutMs(env[IMPLICIT_SESSION_CLOSE_TIMEOUT_ENV], 0) ?? DEFAULT_IMPLICIT_SESSION_CLOSE_TIMEOUT_MS;
 }
 
@@ -438,7 +463,9 @@ export function resolveManagedSessionState(options: {
 	priorSessionName: string;
 	succeeded: boolean;
 }): ManagedSessionState {
-	const { command, managedSessionName, managedSessionNamespace, priorActive, priorNamespace, priorSessionName, succeeded } = options;
+	const { command, managedSessionName, priorActive, priorSessionName, succeeded } = options;
+	const managedSessionNamespace = canonicalizeAgentBrowserNamespace(options.managedSessionNamespace);
+	const priorNamespace = canonicalizeAgentBrowserNamespace(options.priorNamespace);
 	if (!managedSessionName) {
 		return { active: priorActive, ...(priorNamespace ? { namespace: priorNamespace } : {}), sessionName: priorSessionName };
 	}
@@ -458,7 +485,7 @@ export function resolveManagedSessionState(options: {
 	};
 }
 
-function isRestorableManagedSessionName(sessionName: string, fallbackSessionName: string): boolean {
+export function isRestorableManagedSessionName(sessionName: string, fallbackSessionName: string): boolean {
 	return sessionName === fallbackSessionName || sessionName.startsWith(`${fallbackSessionName}-fresh-`);
 }
 
@@ -510,6 +537,7 @@ export function restoreManagedSessionStateFromBranch(
 	branch: unknown[],
 	fallbackSessionName: string,
 ): RestoredManagedSessionState {
+	const restoreDisabledIdentities = new Map<string, ManagedSessionRestoreIdentity>();
 	let restoredState: ManagedSessionState = {
 		active: false,
 		sessionName: fallbackSessionName,
@@ -520,6 +548,7 @@ export function restoreManagedSessionStateFromBranch(
 	const freshSessionRanks = new Map<string, number>();
 
 	const applyManagedClose = (sessionName: string, namespace?: string): void => {
+		namespace = canonicalizeAgentBrowserNamespace(namespace);
 		const restoreRank = getManagedSessionRestoreRank({
 			fallbackSessionName,
 			freshSessionRanks,
@@ -553,7 +582,7 @@ export function restoreManagedSessionStateFromBranch(
 
 		const explicitSessionName = extractExplicitSessionName(args);
 		const sessionName = typeof details.sessionName === "string" ? details.sessionName : undefined;
-		const namespace = typeof details.namespace === "string" ? details.namespace : undefined;
+		const namespace = canonicalizeAgentBrowserNamespace(typeof details.namespace === "string" ? details.namespace : undefined);
 		const sessionMode = details.sessionMode === "fresh" || details.sessionMode === "auto" ? details.sessionMode : undefined;
 		const usedImplicitSession = details.usedImplicitSession === true;
 		const command = typeof details.command === "string" ? details.command : parseCommandInfo(args).command;
@@ -569,6 +598,11 @@ export function restoreManagedSessionStateFromBranch(
 		const explicitCloseSessionName = commandClosesSession && explicitSessionName && restorableDetailSessionName === explicitSessionName
 			? restorableDetailSessionName
 			: undefined;
+		// Sticky restore policy is session-identity state and must apply even for explicit
+		// `--session <current-managed>` rows that are not used for managed-session lifecycle replay.
+		if (details.managedSessionRestoreDisabled === true && typeof sessionName === "string") {
+			restoreDisabledIdentities.set(getAgentBrowserSessionIdentityKey(sessionName, namespace), { namespace, sessionName });
+		}
 		const managedSessionName =
 			!explicitSessionName &&
 			restorableDetailSessionName &&
@@ -597,7 +631,10 @@ export function restoreManagedSessionStateFromBranch(
 		const outcomeRepresentsActiveCurrentSession = outcomeActiveAfter && outcomeCurrentSessionName === managedSessionName && (outcomeStatus === "created" || outcomeStatus === "replaced" || outcomeStatus === "unchanged");
 		const succeeded = outcomeRepresentsActiveCurrentSession ? true : messageIsError === undefined ? exitCode === undefined || exitCode === 0 : !messageIsError;
 		if (commandClosesSession) {
-			if (succeeded) applyManagedClose(managedSessionName, namespace);
+			if (succeeded) {
+				restoreDisabledIdentities.delete(getAgentBrowserSessionIdentityKey(managedSessionName, namespace));
+				applyManagedClose(managedSessionName, namespace);
+			}
 			continue;
 		}
 		const staleCompletion = succeeded && restoreRank < activeRestoreRank;
@@ -624,6 +661,7 @@ export function restoreManagedSessionStateFromBranch(
 		...restoredState,
 		...(closedSessionName ? { closedSessionName } : {}),
 		freshSessionOrdinal,
+		managedSessionRestoreDisabledIdentities: [...restoreDisabledIdentities.values()],
 	};
 }
 
@@ -649,14 +687,14 @@ export function createImplicitSessionName(
 	const cwdHash = createCwdHash(cwd);
 	const stableSessionId = sessionId?.replace(/-/g, "").slice(0, SESSION_NAME_SESSION_ID_LENGTH);
 	if (stableSessionId && stableSessionId.length > 0) {
-		return `piab-${slug}-${stableSessionId}-${cwdHash}`;
+		return `${MANAGED_SESSION_NAME_PREFIX}${slug}-${stableSessionId}-${cwdHash}`;
 	}
 
 	const digest = createHash("sha256")
 		.update(`ephemeral:${cwd}:${ephemeralSeed}`)
 		.digest("hex")
 		.slice(0, SESSION_NAME_SESSION_ID_LENGTH);
-	return `piab-${slug}-${digest}-${cwdHash}`;
+	return `${MANAGED_SESSION_NAME_PREFIX}${slug}-${digest}-${cwdHash}`;
 }
 
 export function createFreshSessionName(baseSessionName: string, ephemeralSeed: string, ordinal: number): string {
@@ -754,34 +792,6 @@ function hasFlagToken(args: string[], flag: string): boolean {
 	return args.some((token) => token === flag || token.startsWith(`${flag}=`));
 }
 
-function getFlagValue(args: string[], flag: string): string | undefined {
-	for (const [index, token] of args.entries()) {
-		if (token === flag) {
-			return args[index + 1];
-		}
-		if (token.startsWith(`${flag}=`)) {
-			return token.slice(flag.length + 1);
-		}
-	}
-	return undefined;
-}
-
-function isBooleanFlagEnabled(args: string[], flag: string): boolean {
-	for (const [index, token] of args.entries()) {
-		if (token === flag) {
-			const nextToken = args[index + 1]?.trim().toLowerCase();
-			if (nextToken === "false") {
-				return false;
-			}
-			return true;
-		}
-		if (token.startsWith(`${flag}=`)) {
-			return token.slice(flag.length + 1).trim().toLowerCase() !== "false";
-		}
-	}
-	return false;
-}
-
 function normalizeComparableUrl(url: string): string | undefined {
 	const normalizedUrl = url.trim();
 	if (normalizedUrl.length === 0) {
@@ -828,35 +838,32 @@ function parseComparableNavigationUrl(url: string): URL | undefined {
 	}
 }
 
-function getDefaultHeadlessCompatUserAgent(platform: NodeJS.Platform = process.platform): string {
+export function getDefaultHeadlessCompatUserAgent(platform: NodeJS.Platform = process.platform): string {
 	return DEFAULT_HEADLESS_COMPAT_USER_AGENT_BY_PLATFORM[platform] ?? FALLBACK_HEADLESS_COMPAT_USER_AGENT;
 }
 
+export function canUseHeadlessCompatibilityUserAgent(args: string[], env: NodeJS.ProcessEnv = getAgentBrowserProcessEnvironment()): boolean {
+	if (hasFlagToken(args, "--user-agent") || hasFlagToken(args, "--args")) return false;
+	if (hasFlagToken(args, "--cdp") || hasFlagToken(args, "--provider") || hasFlagToken(args, "-p")) return false;
+	if (env.AGENT_BROWSER_USER_AGENT !== undefined || env.AGENT_BROWSER_ARGS !== undefined || env.AGENT_BROWSER_CDP !== undefined || env.AGENT_BROWSER_PROVIDER !== undefined) return false;
+	if ((getBooleanFlagValue(args, "--headed") ?? isUpstreamEnvFlagEnabled(env.AGENT_BROWSER_HEADED))
+		|| (getBooleanFlagValue(args, "--auto-connect") ?? isUpstreamEnvFlagEnabled(env.AGENT_BROWSER_AUTO_CONNECT))) return false;
+	const engine = scanUpstreamGlobalFlagOccurrences(args, "--engine").at(-1)?.value ?? env.AGENT_BROWSER_ENGINE;
+	return !engine || engine === "chrome";
+}
+
 function getCompatibilityWorkaround(args: string[], commandInfo: CommandInfo): CompatibilityWorkaround | undefined {
-	if (!commandInfo.command || !isOpenNavigationCommand(commandInfo.command) || !commandInfo.subcommand) {
-		return undefined;
-	}
-	if (hasFlagToken(args, "--user-agent")) {
-		return undefined;
-	}
-	if (isBooleanFlagEnabled(args, "--headed")) {
-		return undefined;
-	}
-	if (hasFlagToken(args, "--cdp") || hasFlagToken(args, "--provider") || hasFlagToken(args, "-p") || isBooleanFlagEnabled(args, "--auto-connect")) {
-		return undefined;
-	}
-	const engine = getFlagValue(args, "--engine");
-	if (engine && engine !== "chrome") {
-		return undefined;
-	}
+	if (!commandInfo.command || !isOpenNavigationCommand(commandInfo.command) || !commandInfo.subcommand || !canUseHeadlessCompatibilityUserAgent(args)) return undefined;
 	const parsedTargetUrl = parseComparableNavigationUrl(commandInfo.subcommand);
-	if (!parsedTargetUrl || !["http:", "https:"].includes(parsedTargetUrl.protocol)) {
-		return undefined;
-	}
+	if (!parsedTargetUrl || !["http:", "https:"].includes(parsedTargetUrl.protocol)) return undefined;
 	const hostname = parsedTargetUrl.hostname.toLowerCase();
-	if (!OPENAI_HEADLESS_COMPAT_HOSTS.has(hostname)) {
-		return undefined;
+	if (hostname === CLOUDFLARE_HEADLESS_COMPAT_HOST) {
+		return {
+			id: "cloudflare-headless-user-agent",
+			reason: "Cloudflare Dashboard challenges the default headless Chrome user agent; inject a normal Chrome user agent so authenticated headless browsing reaches the dashboard instead of Turnstile.",
+		};
 	}
+	if (!OPENAI_HEADLESS_COMPAT_HOSTS.has(hostname)) return undefined;
 	return {
 		id: "chatgpt-headless-user-agent",
 		reason:
@@ -864,56 +871,13 @@ function getCompatibilityWorkaround(args: string[], commandInfo: CommandInfo): C
 	};
 }
 
-export function extractExplicitSessionName(args: string[]): string | undefined {
-	for (const [index, token] of args.entries()) {
-		if (token === "--session") {
-			return args[index + 1];
-		}
-		if (token.startsWith("--session=")) {
-			return token.slice("--session=".length);
-		}
-	}
-	return undefined;
-}
-
-export function extractExplicitNamespace(args: string[]): string | undefined {
-	for (const [index, token] of args.entries()) {
-		if (token === "--namespace") {
-			return args[index + 1];
-		}
-		if (token.startsWith("--namespace=")) {
-			return token.slice("--namespace=".length);
-		}
-	}
-	return undefined;
-}
-
 function stripExplicitNamespaceArgs(args: string[]): string[] {
-	const stripped: string[] = [];
-	for (let index = 0; index < args.length; index += 1) {
-		const token = args[index];
-		if (token === "--namespace") {
-			index += 1;
-			continue;
-		}
-		if (token.startsWith("--namespace=")) continue;
-		stripped.push(token);
+	const namespaceTokenIndexes = new Set<number>();
+	for (const occurrence of scanUpstreamGlobalFlagOccurrences(args, "--namespace")) {
+		namespaceTokenIndexes.add(occurrence.index);
+		namespaceTokenIndexes.add(occurrence.index + 1);
 	}
-	return stripped;
-}
-
-function hasLaunchScopedFlagToken(args: string[], flag: string): boolean {
-	const commandStartIndex = findCommandStartIndex(args);
-	const command = commandStartIndex === undefined ? undefined : args[commandStartIndex];
-	return args.some((token, index) => {
-		if (token !== flag && !token.startsWith(`${flag}=`)) return false;
-		if (flag === "--auto-connect") return isBooleanFlagEnabled(args, flag);
-		if (flag === "--restore" && token === "--restore" && optionalGlobalValueFlagConsumesNext(flag, args[index + 1])) return true;
-		if (flag === "--state" && command === "wait" && commandStartIndex !== undefined && index > commandStartIndex) {
-			return false;
-		}
-		return true;
-	});
+	return args.filter((_token, index) => !namespaceTokenIndexes.has(index));
 }
 
 export function getStartupScopedFlags(args: string[]): string[] {
@@ -927,20 +891,35 @@ export function buildExecutionPlan(
 	options: {
 		freshSessionName: string;
 		managedSessionActive: boolean;
+		managedSessionCompatibilityWorkaround?: CompatibilityWorkaround;
 		managedSessionName: string;
 		managedSessionNamespace?: string;
 		sessionMode: SessionMode;
 	},
 ): ExecutionPlan {
 	const invalidValueFlag = getInvalidValueFlagDetails(args);
+	const unsupportedIdentityAssignment = getUnsupportedLeadingIdentityAssignment(args);
+	const explicitNamespacePresent = scanUpstreamGlobalFlagOccurrences(args, "--namespace").length > 0;
 	const explicitNamespace = extractExplicitNamespace(args);
-	const startupScopedFlags = getStartupScopedFlags(args).filter((flag) => !(flag === "--namespace" && explicitNamespace === options.managedSessionNamespace));
+	const managedSessionNamespace = canonicalizeAgentBrowserNamespace(options.managedSessionNamespace);
+	const startupScopedFlags = getStartupScopedFlags(args).filter((flag) => !(flag === "--namespace" && explicitNamespacePresent && explicitNamespace === managedSessionNamespace));
 	const plainTextInspection = isPlainTextInspectionArgs(args);
 	const argvDescriptor = parseArgvDescriptor(args);
 	const commandInfo = argvDescriptor.commandInfo;
 	const commandNeedsManagedSession = !plainTextInspection && needsManagedSession(argvDescriptor);
 	const effectiveArgs = plainTextInspection ? [...args] : args.includes("--json") ? [] : ["--json"];
-	let namespace = explicitNamespace;
+	let namespace = explicitNamespacePresent ? explicitNamespace ?? "" : undefined;
+	if (plainTextInspection) {
+		return {
+			commandInfo,
+			effectiveArgs,
+			namespace,
+			plainTextInspection,
+			startupScopedFlags,
+			usedImplicitSession: false,
+		};
+	}
+
 	if (invalidValueFlag) {
 		return {
 			commandInfo: {},
@@ -953,24 +932,42 @@ export function buildExecutionPlan(
 		};
 	}
 
-	if (plainTextInspection) {
+	if (unsupportedIdentityAssignment) {
 		return {
-			commandInfo,
+			commandInfo: {},
 			effectiveArgs,
-			namespace,
-			plainTextInspection,
-			startupScopedFlags,
+			plainTextInspection: false,
+			startupScopedFlags: [],
 			usedImplicitSession: false,
+			validationError:
+				`${unsupportedIdentityAssignment}=... is not supported by agent-browser 0.33.2. Pass ${unsupportedIdentityAssignment} and its value as separate arguments.`,
+		};
+	}
+
+	for (const flag of ["--session", "--namespace"] as const) {
+		if (countExplicitGlobalFlags(args, flag) <= 1) continue;
+		return {
+			commandInfo: {},
+			effectiveArgs,
+			plainTextInspection: false,
+			startupScopedFlags: [],
+			usedImplicitSession: false,
+			validationError:
+				`Multiple ${flag} flags are not supported. Pass a single ${flag} value; upstream uses the last occurrence while this wrapper would otherwise mis-attribute managed-session ownership.`,
 		};
 	}
 
 	const explicitSessionName = extractExplicitSessionName(args);
+	if (explicitSessionName && !isWrapperManagedSessionName(explicitSessionName)) {
+		namespace = resolveAgentBrowserNamespace(args, getAgentBrowserProcessEnvironment().AGENT_BROWSER_NAMESPACE);
+	}
 	const shouldCreateFreshManagedSession =
 		!explicitSessionName && options.sessionMode === "fresh" && commandInfo.command !== undefined && !isCloseCommand(commandInfo.command);
 	let argsToAppend = args;
-	const compatibilityWorkaround = getCompatibilityWorkaround(args, commandInfo);
-	if (explicitSessionName && explicitNamespace) {
-		effectiveArgs.push("--namespace", explicitNamespace);
+	const requestedCompatibilityWorkaround = getCompatibilityWorkaround(args, commandInfo);
+	let compatibilityWorkaround = requestedCompatibilityWorkaround;
+	if (explicitSessionName && explicitNamespacePresent) {
+		effectiveArgs.push("--namespace", explicitNamespace ?? "");
 		argsToAppend = stripExplicitNamespaceArgs(args);
 	}
 	let managedSessionName: string | undefined;
@@ -993,22 +990,29 @@ export function buildExecutionPlan(
 				"Retry this call with `sessionMode: \"fresh\"` to force a fresh upstream launch, or pass an explicit `--session ...` if you want to name the new session yourself.",
 			].join(" ");
 		} else {
-			namespace = explicitNamespace ?? options.managedSessionNamespace;
-			if (namespace) effectiveArgs.push("--namespace", namespace);
+			namespace = explicitNamespacePresent ? explicitNamespace ?? "" : managedSessionNamespace;
+			if (namespace !== undefined) effectiveArgs.push("--namespace", namespace);
 			effectiveArgs.push("--session", options.managedSessionName);
-			if (explicitNamespace) argsToAppend = stripExplicitNamespaceArgs(args);
+			if (explicitNamespacePresent) argsToAppend = stripExplicitNamespaceArgs(args);
 			managedSessionName = options.managedSessionName;
 			sessionName = options.managedSessionName;
 			usedImplicitSession = true;
 		}
 	} else if (shouldCreateFreshManagedSession && commandNeedsManagedSession) {
-		if (namespace) effectiveArgs.push("--namespace", namespace);
+		if (namespace !== undefined) effectiveArgs.push("--namespace", namespace);
 		effectiveArgs.push("--session", options.freshSessionName);
-		if (explicitNamespace) argsToAppend = stripExplicitNamespaceArgs(args);
+		if (explicitNamespacePresent) argsToAppend = stripExplicitNamespaceArgs(args);
 		managedSessionName = options.freshSessionName;
 		sessionName = options.freshSessionName;
 	}
 
+	if (!compatibilityWorkaround
+		&& canUseHeadlessCompatibilityUserAgent(args)
+		&& options.managedSessionActive
+		&& sessionName
+		&& getAgentBrowserSessionIdentityKey(sessionName, namespace) === getAgentBrowserSessionIdentityKey(options.managedSessionName, options.managedSessionNamespace)) {
+		compatibilityWorkaround = options.managedSessionCompatibilityWorkaround;
+	}
 	if (compatibilityWorkaround) {
 		effectiveArgs.push("--user-agent", getDefaultHeadlessCompatUserAgent());
 	}

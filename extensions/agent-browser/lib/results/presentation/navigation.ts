@@ -1,9 +1,3 @@
-/**
- * Purpose: Format scalar extraction results, navigation summaries, and page-change summaries.
- * Responsibilities: Keep navigation/extraction presentation separate from core tool result orchestration.
- * Scope: Navigation and get/eval extraction formatting only.
- */
-
 import { isNavigationObservableCommandName, isPageChangeSummaryCommand } from "../../command-taxonomy.js";
 import { isRecord } from "../../parsing.js";
 import type { CommandInfo } from "../../runtime.js";
@@ -18,14 +12,20 @@ interface NavigationSummary {
 	url?: string;
 }
 
-function getScalarExtractionResult(data: Record<string, unknown>): string | undefined {
-	const { result } = data;
-	if (typeof result === "string") {
-		return result.trim().length > 0 ? result : undefined;
-	}
-	if (typeof result === "number" || typeof result === "boolean") {
-		return String(result);
-	}
+const GET_RESULT_FIELDS: Record<string, string> = {
+	attr: "value",
+	count: "count",
+	html: "html",
+	text: "text",
+	title: "title",
+	url: "url",
+	value: "value",
+};
+
+function getScalarExtractionResult(commandInfo: CommandInfo, data: Record<string, unknown>): string | undefined {
+	const result = data.result ?? (commandInfo.command === "get" && commandInfo.subcommand ? data[GET_RESULT_FIELDS[commandInfo.subcommand] ?? ""] : undefined);
+	if (typeof result === "string") return result.trim().length > 0 ? result : undefined;
+	if (typeof result === "number" || typeof result === "boolean") return String(result);
 	return undefined;
 }
 
@@ -50,7 +50,7 @@ function formatGetSummaryLabel(subcommand: string | undefined): string {
 }
 
 export function formatExtractionSummary(commandInfo: CommandInfo, data: Record<string, unknown>): string | undefined {
-	const scalarResult = getScalarExtractionResult(data);
+	const scalarResult = getScalarExtractionResult(commandInfo, data);
 	if (!scalarResult) {
 		return undefined;
 	}
@@ -69,7 +69,7 @@ export function formatExtractionText(commandInfo: CommandInfo, data: Record<stri
 	if (commandInfo.command !== "get" && commandInfo.command !== "eval") {
 		return undefined;
 	}
-	const scalarResult = getScalarExtractionResult(data);
+	const scalarResult = getScalarExtractionResult(commandInfo, data);
 	if (!scalarResult) {
 		return undefined;
 	}

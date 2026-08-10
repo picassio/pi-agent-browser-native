@@ -1,9 +1,3 @@
-/**
- * Purpose: Shared argv flag-shape metadata and helpers for command discovery and sessionless policy checks.
- * Responsibilities: Own global/command value-flag sets and boolean/value-flag validation used during argv parsing.
- * Scope: Pure token grammar; command semantics and subprocess execution live elsewhere.
- */
-
 import { isKnownCommandToken } from "./command-taxonomy.js";
 
 export const GLOBAL_VALUE_FLAGS = [
@@ -95,6 +89,7 @@ export const GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES: ReadonlySet<string> = ne
 	"--content-boundaries",
 	"--debug",
 	"--headed",
+	"--hide-scrollbars",
 	"--ignore-https-errors",
 	"--json",
 	"--no-auto-dialog",
@@ -104,6 +99,141 @@ export const GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES: ReadonlySet<string> = ne
 	"-v",
 	"--webgpu",
 ]);
+
+export interface UpstreamGlobalFlagOccurrence {
+	index: number;
+	value?: string;
+}
+
+const SESSION_COMPONENT_ALPHANUMERIC = /^[\p{Alphabetic}\p{Number}]$/u;
+
+/** Match upstream's last-wins, case-sensitive boolean semantics; only exact `false` disables a present flag. */
+export function getBooleanFlagValue(args: string[], flag: string): boolean | undefined {
+	let enabled: boolean | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const token = args[index];
+		if (token === flag) {
+			enabled = args[index + 1] !== "false";
+			if (["true", "false"].includes(args[index + 1] ?? "")) index += 1;
+			continue;
+		}
+		if (PREVALIDATED_VALUE_FLAGS.has(token)) {
+			index += 1;
+			continue;
+		}
+		if (GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token) && ["true", "false"].includes(args[index + 1] ?? "")) index += 1;
+	}
+	return enabled;
+}
+
+export function isBooleanFlagEnabled(args: string[], flag: string): boolean {
+	return getBooleanFlagValue(args, flag) ?? false;
+}
+
+/** Match upstream env_var_is_truthy exactly: lowercase only, without trimming or accepting "off". */
+export function isUpstreamEnvFlagEnabled(value: string | undefined): boolean {
+	return value !== undefined && !["", "0", "false", "no"].includes(value.toLowerCase());
+}
+
+/** Mirror upstream sanitize_session_component for namespace/socket/state identity. */
+export function canonicalizeAgentBrowserNamespace(value: string | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	let normalized = "";
+	let lastWasSeparator = false;
+	for (const character of value) {
+		if (SESSION_COMPONENT_ALPHANUMERIC.test(character)) {
+			normalized += character.toLowerCase();
+			lastWasSeparator = false;
+		} else if (character === "-" || character === "_") {
+			if (normalized && !lastWasSeparator) {
+				normalized += character;
+				lastWasSeparator = true;
+			}
+		} else if (normalized && !lastWasSeparator) {
+			normalized += "-";
+			lastWasSeparator = true;
+		}
+	}
+	return normalized.replace(/[-_]+$/u, "") || undefined;
+}
+
+function foldAgentBrowserFilesystemIdentity(value: string, platform: NodeJS.Platform): string {
+	if (platform !== "darwin" && platform !== "win32") return value;
+	// APFS aliases include full Unicode folds such as ß/SS and ς/Σ, not just ASCII case.
+	return value.normalize("NFC").toLowerCase().toUpperCase().toLowerCase().normalize("NFC");
+}
+
+export function getAgentBrowserSessionIdentityKey(sessionName: string, namespace?: string, platform: NodeJS.Platform = process.platform): string {
+	const canonicalNamespace = canonicalizeAgentBrowserNamespace(namespace);
+	const identityNamespace = canonicalNamespace ? foldAgentBrowserFilesystemIdentity(canonicalNamespace, platform) : undefined;
+	const canonicalSessionName = foldAgentBrowserFilesystemIdentity(sessionName, platform);
+	return identityNamespace ? `${identityNamespace}\0${canonicalSessionName}` : canonicalSessionName;
+}
+
+/** Mirror upstream 0.33.2 global parsing: full argv, no `--` sentinel, and only global value payloads are skipped. */
+export function scanUpstreamGlobalFlagOccurrences(args: string[], targetFlag: string): UpstreamGlobalFlagOccurrence[] {
+	const occurrences: UpstreamGlobalFlagOccurrence[] = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const token = args[index];
+		if (token === targetFlag) {
+			occurrences.push({ index, value: args[index + 1] });
+			index += 1;
+			continue;
+		}
+		if (PREVALIDATED_VALUE_FLAGS.has(token)) {
+			index += 1;
+			continue;
+		}
+		if (GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token) && ["true", "false"].includes(args[index + 1] ?? "")) index += 1;
+	}
+	return occurrences;
+}
+
+export function extractExplicitSessionName(args: string[]): string | undefined {
+	return scanUpstreamGlobalFlagOccurrences(args, "--session").at(-1)?.value;
+}
+
+export function extractExplicitNamespace(args: string[]): string | undefined {
+	return canonicalizeAgentBrowserNamespace(scanUpstreamGlobalFlagOccurrences(args, "--namespace").at(-1)?.value);
+}
+
+export function resolveAgentBrowserNamespace(args: string[], envValue: string | undefined): string | undefined {
+	const occurrences = scanUpstreamGlobalFlagOccurrences(args, "--namespace");
+	if (occurrences.length > 0) return canonicalizeAgentBrowserNamespace(occurrences.at(-1)?.value) ?? "";
+	return canonicalizeAgentBrowserNamespace(envValue);
+}
+
+/** Mirror upstream's optional restore value and full-argv last-wins parsing. */
+export function extractRequestedRestoreKey(args: string[], sessionName: string, envValue: string | undefined): string | null {
+	let restoreKey = envValue || null;
+	let seenCommand = false;
+	for (let index = 0; index < args.length; index += 1) {
+		const token = args[index];
+		if (token.startsWith("--restore=")) {
+			restoreKey = token.slice("--restore=".length) || sessionName;
+			continue;
+		}
+		if (token === "--restore") {
+			if (!seenCommand && optionalGlobalValueFlagConsumesNext(token, args[index + 1])) {
+				restoreKey = args[index + 1] as string;
+				index += 1;
+			} else {
+				restoreKey = sessionName;
+			}
+			continue;
+		}
+		if (PREVALIDATED_VALUE_FLAGS.has(token)) {
+			index += 1;
+			continue;
+		}
+		if (GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token) && ["true", "false"].includes(args[index + 1] ?? "")) {
+			index += 1;
+			continue;
+		}
+		if (isKnownCommandToken(token)) seenCommand = true;
+	}
+	return restoreKey;
+}
 
 export function getFlagName(token: string): string {
 	return token.split("=", 1)[0] ?? token;

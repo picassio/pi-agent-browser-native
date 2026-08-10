@@ -1,5 +1,5 @@
 import { isRecord } from "../../../parsing.js";
-import { buildAgentBrowserResultCategoryDetails } from "../../../results.js";
+import { buildAgentBrowserResultCategoryDetails } from "../../../results/categories.js";
 import { redactSensitiveText, type CompatibilityWorkaround } from "../../../runtime.js";
 import { buildSessionDetailFields, runSessionCommandData } from "../session-state.js";
 
@@ -81,6 +81,7 @@ export async function tryNetworkRequestsPageFilter(options: {
 	compatibilityWorkaround?: CompatibilityWorkaround;
 	cwd: string;
 	effectiveArgs: string[];
+	managedSessionRestoreDisabled: () => boolean;
 	redactedArgs: string[];
 	sessionMode: "auto" | "fresh";
 	namespace?: string;
@@ -109,7 +110,7 @@ export async function tryNetworkRequestsPageFilter(options: {
 			networkRequestsPageFilter: { cleanArgs: request.cleanArgs, currentUrl: redactSensitiveText(currentUrl), matchedRows: filtered.matchedRows, mode: request.mode, totalRows: filtered.totalRows },
 			sessionMode: options.sessionMode,
 			...buildAgentBrowserResultCategoryDetails({ args: options.effectiveArgs, command: "network", succeeded: true }),
-			...buildSessionDetailFields(options.sessionName, options.usedImplicitSession, options.namespace),
+			...buildSessionDetailFields(options.sessionName, options.usedImplicitSession, options.namespace, options.managedSessionRestoreDisabled()),
 			summary,
 		},
 		isError: false,

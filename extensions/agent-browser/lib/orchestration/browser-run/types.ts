@@ -3,23 +3,16 @@ import type { ChildProcess } from "node:child_process";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { ElectronCleanupResult, ElectronLaunchStatus } from "../../electron/cleanup.js";
 import type { ElectronCdpTarget, ElectronLaunchRecord, ElectronLaunchSuccess } from "../../electron/launch.js";
-import type {
-	AgentBrowserNetworkSourceLookupAnalysis,
-	AgentBrowserQaPresetAnalysis,
-	AgentBrowserSourceLookupAnalysis,
-	CompiledAgentBrowserElectron,
-	CompiledAgentBrowserJob,
-	CompiledAgentBrowserNetworkSourceLookup,
-	CompiledAgentBrowserQaPreset,
-	CompiledAgentBrowserSemanticAction,
-	CompiledAgentBrowserSourceLookup,
-} from "../../input-modes.js";
+import type { AgentBrowserNetworkSourceLookupAnalysis, AgentBrowserQaPresetAnalysis, AgentBrowserSourceLookupAnalysis, CompiledAgentBrowserElectron, CompiledAgentBrowserJob, CompiledAgentBrowserNetworkSourceLookup, CompiledAgentBrowserQaPreset, CompiledAgentBrowserSemanticAction, CompiledAgentBrowserSourceLookup } from "../../input-modes/types.js";
 import type { runAgentBrowserProcess } from "../../process.js";
-import type { AgentBrowserEnvelope, AgentBrowserNextAction, buildAgentBrowserResultCategoryDetails, buildToolPresentation } from "../../results.js";
-import type { NetworkRouteRecord, SessionArtifactManifest } from "../../results/contracts.js";
+import type { AgentBrowserEnvelope, AgentBrowserNextAction, NetworkRouteRecord, SessionArtifactManifest } from "../../results/contracts.js";
+import type { buildAgentBrowserResultCategoryDetails } from "../../results/categories.js";
+import type { buildToolPresentation } from "../../results/presentation.js";
 import type { RichInputRecoveryDiagnostic, VisibleRefFallbackDiagnostic } from "../../results/selector-recovery.js";
 import type { SessionPageState, SessionRefSnapshot, SessionRefSnapshotInvalidation, SessionTabTarget } from "../../session-page-state.js";
 import type { buildExecutionPlan, CompatibilityWorkaround, OpenResultTabCorrection } from "../../runtime.js";
+import type { ManagedSessionRestoreState, OwnedManagedSessionContext } from "../../managed-session-restore.js";
+import type { ManagedSessionPolicyLock } from "../../managed-session-policy-lock.js";
 import type { AllowedDomainsPolicy } from "../../navigation-policy.js";
 import type { PromptPolicy } from "../../prompt-policy.js";
 import type { AgentBrowserExecuteParams, ResolvedAgentBrowserValidInput } from "../input-plan.js";
@@ -62,8 +55,17 @@ export interface BrowserRunInputFields {
 	toolStdin?: string;
 }
 
+export interface OwnedManagedSessionReference {
+	cwd: string;
+	headedManagedAutosaveDisabled?: boolean;
+	headedManagedAutosaveInterval?: string;
+	namespace?: string;
+	sessionName: string;
+}
+
 export interface BrowserRunState {
 	allowedDomainsBySession: Map<string, AllowedDomainsPolicy>;
+	attachedSessionKeys: Set<string>;
 	artifactManifest?: SessionArtifactManifest;
 	closedManagedSessionNames: Set<string>;
 	electronChildProcesses: Map<string, ChildProcess>;
@@ -72,10 +74,15 @@ export interface BrowserRunState {
 	freshSessionOrdinal: number;
 	managedSessionActive: boolean;
 	managedSessionBaseName: string;
+	managedSessionCompatibilityWorkaround?: CompatibilityWorkaround;
+	managedSessionHeadedAutosaveDisabled?: boolean;
+	managedSessionHeadedAutosaveInterval?: string;
 	managedSessionCwd: string;
 	managedSessionName: string;
 	managedSessionNamespace?: string;
+	managedSessionRestoreState: ManagedSessionRestoreState;
 	networkRoutesBySession: Map<string, NetworkRouteRecord[]>;
+	ownedManagedSessions: ReadonlyMap<string, OwnedManagedSessionReference>;
 	sessionPageState: SessionPageState;
 	traceOwners: Map<string, TraceOwner>;
 }
@@ -85,6 +92,9 @@ export interface BrowserRunStatePatch {
 	artifactManifest?: SessionArtifactManifest;
 	freshSessionOrdinal?: number;
 	managedSessionActive?: boolean;
+	managedSessionCompatibilityWorkaround?: CompatibilityWorkaround;
+	managedSessionHeadedAutosaveDisabled?: boolean;
+	managedSessionHeadedAutosaveInterval?: string;
 	managedSessionCwd?: string;
 	managedSessionName?: string;
 	managedSessionNamespace?: string;
@@ -96,11 +106,13 @@ export interface BrowserRunOptions {
 	cwd: string;
 	electronPostCommandStatusSettleMs: number;
 	electronProfileIsolationDetails: unknown;
+	establishAttachedBrowserSession?: boolean;
 	implicitSessionCloseTimeoutMs: number;
 	implicitSessionIdleTimeoutMs: string;
 	input: ResolvedAgentBrowserValidInput;
 	onUpdate?: (result: AgentToolResult<unknown>) => void;
 	params: AgentBrowserExecuteParams;
+	preserveAttachedBrowserSession?: boolean;
 	promptPolicy: PromptPolicy;
 	sessionPageStateUpdate: ReturnType<SessionPageState["beginUpdate"]>;
 	signal?: AbortSignal;
@@ -266,6 +278,7 @@ export interface ManagedSessionOutcome {
 	currentSessionName: string;
 	currentSessionNamespace?: string;
 	previousSessionName: string;
+	replacedSessionClosed?: boolean;
 	replacedSessionName?: string;
 	replacedSessionNamespace?: string;
 	sessionMode: "auto" | "fresh";
@@ -356,6 +369,7 @@ export interface AboutBlankSessionMismatch {
 
 export interface ElectronHandoffSummary {
 	error?: string;
+	failureCategory?: "aborted" | "upstream-error" | "validation-error";
 	handoff: "connect" | "snapshot" | "tabs";
 	refSnapshot?: SessionRefSnapshot;
 	snapshot?: unknown;
@@ -435,11 +449,14 @@ export interface PreparedBrowserRun {
 	exactSensitiveValues: string[];
 	executionPlan: AgentBrowserExecutionPlan;
 	includePinnedNavigationSummary: boolean;
+	managedSessionPolicyLock?: ManagedSessionPolicyLock;
+	ownedManagedSessionContext?: OwnedManagedSessionContext;
 	clickDispatchProbe?: ClickDispatchProbe;
 	pinnedBatchUnwrapMode?: PinnedBatchUnwrapMode;
 	preparedArgs: PreparedAgentBrowserArgs;
 	priorRefSnapshotState?: SessionRefSnapshot;
 	priorSessionTabTarget?: SessionTabTarget;
+	priorSessionTabTargetUnknown?: true;
 	processArgs: string[];
 	processStdin?: string;
 	processTimeoutMs?: number;
@@ -510,6 +527,7 @@ export interface FinalResultInput {
 	currentRefSnapshot?: SessionRefSnapshot;
 	currentRefSnapshotInvalidation?: SessionRefSnapshotInvalidation;
 	currentSessionTabTarget?: SessionTabTarget;
+	currentSessionTabTargetUnknown?: true;
 	electronBroadGetTextScopeDiagnostics: ElectronBroadGetTextScopeDiagnostic[];
 	electronFailedConnectCleanup?: ElectronCleanupResult;
 	electronHandoff?: ElectronHandoffSummary;
@@ -527,7 +545,10 @@ export interface FinalResultInput {
 	executionPlan: AgentBrowserExecutionPlan;
 	fillVerificationDiagnostic?: FillVerificationDiagnostic;
 	inspectionText?: string;
+	managedSessionHeadedAutosaveDisabled?: boolean;
+	managedSessionHeadedAutosaveInterval?: string;
 	managedSessionOutcome?: ManagedSessionOutcome;
+	managedSessionRestoreDisabled: boolean;
 	navigationSummary?: NavigationSummary;
 	networkSourceLookup?: AgentBrowserNetworkSourceLookupAnalysis;
 	noActivePageSnapshotFailure: boolean;

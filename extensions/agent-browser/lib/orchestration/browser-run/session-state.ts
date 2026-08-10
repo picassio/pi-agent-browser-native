@@ -1,9 +1,12 @@
 import { rm } from "node:fs/promises";
 
+import type { PersistentSessionArtifactStore } from "../../temp.js";
 import type { ElectronLaunchStatus } from "../../electron/cleanup.js";
 import type { ElectronCdpTarget, ElectronLaunchRecord } from "../../electron/launch.js";
 import { runAgentBrowserProcess } from "../../process.js";
-import { buildAgentBrowserNextActions, getAgentBrowserErrorText, parseAgentBrowserEnvelope, type AgentBrowserBatchResult, type AgentBrowserEnvelope, type AgentBrowserNextAction } from "../../results.js";
+import { buildAgentBrowserNextActions } from "../../results/action-recommendations.js";
+import { parseAgentBrowserEnvelope } from "../../results/envelope.js";
+import { type AgentBrowserBatchResult, type AgentBrowserEnvelope, type AgentBrowserNextAction } from "../../results/contracts.js";
 import { buildNextToolAction, withOptionalNamespaceArgs, withOptionalSessionArgs } from "../../results/next-actions.js";
 import {
 	getSessionPageStateKey,
@@ -24,11 +27,10 @@ import {
 	isSessionTabPinningExcludedCommand,
 	isSessionTabPostCommandCorrectionExcludedCommand,
 } from "../../command-taxonomy.js";
-import { chooseOpenResultTabCorrection, redactInvocationArgs, type OpenResultTabCorrection } from "../../runtime.js";
+import { chooseOpenResultTabCorrection, type OpenResultTabCorrection } from "../../runtime.js";
 import { isRecord } from "../../parsing.js";
 import { parseUserBatchStdin } from "../batch-stdin.js";
-import type {
-	AboutBlankSessionMismatch,
+import type { AboutBlankSessionMismatch,
 	BatchCommandStep,
 	BrowserRunState,
 	BrowserRunStatePatch,
@@ -43,6 +45,7 @@ import type {
 	PinnedBatchPlan,
 	PinnedBatchUnwrapMode,
 	StaleRefPreflight,
+	BrowserRunContext,
 	TraceOwner,
 } from "./types.js";
 
@@ -54,6 +57,9 @@ export function applyBrowserRunStatePatch(state: BrowserRunState, patch: Browser
 	if ("artifactManifest" in patch) state.artifactManifest = patch.artifactManifest;
 	if (patch.freshSessionOrdinal !== undefined) state.freshSessionOrdinal = patch.freshSessionOrdinal;
 	if (patch.managedSessionActive !== undefined) state.managedSessionActive = patch.managedSessionActive;
+	if ("managedSessionCompatibilityWorkaround" in patch) state.managedSessionCompatibilityWorkaround = patch.managedSessionCompatibilityWorkaround;
+	if (patch.managedSessionHeadedAutosaveDisabled !== undefined) state.managedSessionHeadedAutosaveDisabled = patch.managedSessionHeadedAutosaveDisabled;
+	if ("managedSessionHeadedAutosaveInterval" in patch) state.managedSessionHeadedAutosaveInterval = patch.managedSessionHeadedAutosaveInterval;
 	if (patch.managedSessionCwd !== undefined) state.managedSessionCwd = patch.managedSessionCwd;
 	if (patch.managedSessionName !== undefined) state.managedSessionName = patch.managedSessionName;
 	if ("managedSessionNamespace" in patch) state.managedSessionNamespace = patch.managedSessionNamespace;
@@ -62,8 +68,22 @@ export function applyBrowserRunStatePatch(state: BrowserRunState, patch: Browser
 
 export const getSessionContextKey = getSessionPageStateKey;
 
-export function buildSessionDetailFields(sessionName: string | undefined, usedImplicitSession: boolean, namespace?: string): Record<string, unknown> {
-	return { ...(namespace ? { namespace } : {}), ...(sessionName ? { sessionName, usedImplicitSession } : {}) };
+export function buildSessionDetailFields(
+	sessionName: string | undefined,
+	usedImplicitSession: boolean,
+	namespace?: string,
+	managedSessionRestoreDisabled = false,
+): Record<string, unknown> {
+	return {
+		...(namespace !== undefined ? { namespace } : {}),
+		...(sessionName
+			? {
+				sessionName,
+				usedImplicitSession,
+				...(managedSessionRestoreDisabled ? { managedSessionRestoreDisabled: true } : {}),
+			}
+			: {}),
+	};
 }
 
 export function buildManagedSessionOutcome(options: {
@@ -165,6 +185,12 @@ function formatManagedSessionOutcomeRecoveryGuidance(outcome: ManagedSessionOutc
 
 export function formatManagedSessionOutcomeText(outcome: ManagedSessionOutcome | undefined): string | undefined {
 	if (!outcome) return undefined;
+	if (outcome.replacedSessionClosed === false) {
+		const cleanupWarning = "Cleanup warning: Automatic close of the previous wrapper-managed session failed, so it remains wrapper-owned. Use details.managedSessionOutcome for its exact identity and close it explicitly when safe.";
+		return outcome.succeeded
+			? ["Managed session outcome: The fresh browser became current.", cleanupWarning].join("\n")
+			: [formatManagedSessionOutcomeHeadline(outcome), formatManagedSessionOutcomeRecoveryGuidance(outcome), cleanupWarning].join("\n");
+	}
 	if (outcome.status === "closed" && outcome.succeeded) {
 		return [
 			"Managed session outcome: The current wrapper-managed browser session was closed.",
@@ -282,6 +308,7 @@ export function extractNavigationSummaryFromData(data: unknown): NavigationSumma
 }
 
 export function shouldCaptureNavigationSummary(command: string | undefined, data: unknown): boolean {
+	if (command === "eval") return true;
 	if (isRecord(data) && typeof data.clicked === "string" && !data.clicked.startsWith("@") && !data.clicked.startsWith("ref=") && typeof data.href !== "string") return false;
 	return (
 		isNavigationObservableCommandName(command) &&
@@ -582,17 +609,21 @@ export function unwrapPinnedSessionBatchEnvelope(options: {
 export async function runSessionCommandData(options: {
 	args: string[];
 	cwd: string;
+	allowManagedSessionTarget?: boolean;
 	namespace?: string;
+	pinNamespace?: boolean;
 	sessionName?: string;
 	signal?: AbortSignal;
 	stdin?: string;
+	throwOnFailure?: boolean;
 	timeoutMs?: number;
 }): Promise<unknown | undefined> {
-	const { args, cwd, namespace, sessionName, signal, stdin, timeoutMs } = options;
+	const { allowManagedSessionTarget, args, cwd, namespace, pinNamespace, sessionName, signal, stdin, throwOnFailure, timeoutMs } = options;
 	if (!sessionName) return undefined;
 
 	const processResult = await runAgentBrowserProcess({
-		args: ["--json", ...(namespace ? ["--namespace", namespace] : []), "--session", sessionName, ...args],
+		allowManagedSessionTarget,
+		args: ["--json", ...(namespace !== undefined || pinNamespace ? ["--namespace", namespace ?? ""] : []), "--session", sessionName, ...args],
 		cwd,
 		signal,
 		stdin,
@@ -600,6 +631,14 @@ export async function runSessionCommandData(options: {
 	});
 	try {
 		if (processResult.aborted || processResult.spawnError || processResult.exitCode !== 0) {
+			if (throwOnFailure) {
+				const reason = processResult.aborted
+					? "command was aborted"
+					: processResult.spawnError
+						? "process could not start"
+						: `process exited with code ${processResult.exitCode}`;
+				throw new Error(`agent-browser ${reason}`);
+			}
 			return undefined;
 		}
 		const parsed = await parseAgentBrowserEnvelope({
@@ -607,6 +646,7 @@ export async function runSessionCommandData(options: {
 			stdoutPath: processResult.stdoutSpillPath,
 		});
 		if (parsed.parseError || parsed.envelope?.success === false) {
+			if (throwOnFailure) throw new Error(parsed.parseError ? "agent-browser returned invalid structured output" : "agent-browser reported failure");
 			return undefined;
 		}
 		return parsed.envelope?.data;
@@ -880,37 +920,10 @@ export function formatElectronRefFreshnessText(diagnostic: ElectronRefFreshnessD
 	return diagnostic?.summary;
 }
 
-export async function closeManagedSession(options: { cwd: string; namespace?: string; sessionName: string; timeoutMs: number }): Promise<string | undefined> {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), options.timeoutMs);
-	let stdoutSpillPath: string | undefined;
-	const closeArgs = [...(options.namespace ? ["--namespace", options.namespace] : []), "--session", options.sessionName, "close"];
-	try {
-		const processResult = await runAgentBrowserProcess({
-			args: closeArgs,
-			cwd: options.cwd,
-			signal: controller.signal,
-		});
-		stdoutSpillPath = processResult.stdoutSpillPath;
-		return getAgentBrowserErrorText({
-			aborted: processResult.aborted,
-			command: "close",
-			effectiveArgs: redactInvocationArgs(closeArgs),
-			exitCode: processResult.exitCode,
-			plainTextInspection: false,
-			spawnError: processResult.spawnError,
-			stderr: processResult.stderr,
-			timedOut: processResult.timedOut,
-			timeoutMs: processResult.timeoutMs,
-		});
-	} catch (error) {
-		return error instanceof Error ? error.message : String(error);
-	} finally {
-		clearTimeout(timer);
-		if (stdoutSpillPath) {
-			await rm(stdoutSpillPath, { force: true }).catch(() => undefined);
-		}
-	}
-}
-
 export { extractBatchResultCommand };
+
+export function getPersistentSessionArtifactStore(ctx: BrowserRunContext): PersistentSessionArtifactStore | undefined {
+	const sessionDir = typeof ctx.sessionManager.getSessionDir === "function" ? ctx.sessionManager.getSessionDir() : undefined;
+	const sessionId = ctx.sessionManager.getSessionId();
+	return sessionDir && sessionId ? { sessionDir, sessionId } : undefined;
+}

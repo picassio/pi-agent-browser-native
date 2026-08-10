@@ -3,7 +3,7 @@
  * Responsibilities: Build fake pi extension contexts, run registered extension events/tools, patch process env safely, create fake agent-browser binaries, read invocation logs, and manage child-process fixtures.
  * Scope: Test-only utilities for `test/agent-browser.*.test.ts`; production code must not import this module.
  * Usage: Import focused helpers from `./helpers/agent-browser-harness.js` inside Node test-runner suites.
- * Invariants/Assumptions: Helpers preserve caller-owned cleanup responsibilities and restore patched environment variables after each run. `writeFakeAgentBrowserBinary` installs a Unix shell-script launcher or a Windows `agent-browser.cmd` that runs the same Node script body; pass `platform: "win32"` to assert Windows launcher layout from non-Windows hosts (spawn/PATHEXT behavior still needs a real Windows runner).
+ * Invariants/Assumptions: Helpers preserve caller-owned cleanup responsibilities and restore patched environment variables after each run. `writeFakeAgentBrowserBinary` installs a Unix shell-script launcher or a Windows `agent-browser.cmd`; fake daemons report inactive `session info` by default, and stateful daemon tests set `PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO=1`; pass `platform: "win32"` to assert Windows launcher layout from non-Windows hosts (spawn/PATHEXT behavior still needs a real Windows runner).
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -210,6 +210,7 @@ export function createToolBranchEntry(options: { details: Record<string, unknown
 }
 
 export type AgentBrowserToolParams = {
+	script?: string;
 	args?: string[];
 	semanticAction?: {
 		action: "check" | "click" | "fill" | "select";
@@ -372,6 +373,7 @@ function adaptRegisteredTool<TParams extends TSchema, TDetails, TState>(
 export function createExtensionHarness(options: {
 	branch?: unknown[];
 	cwd: string;
+	onAppendEntry?: (customType: string, data: unknown) => void;
 	projectTrusted?: boolean;
 	prompt?: string;
 	sessionDir?: string;
@@ -380,8 +382,14 @@ export function createExtensionHarness(options: {
 }) {
 	const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
 	const registeredTools = new Map<string, RegisteredTool>();
+	const appendedEntries: Array<{ customType: string; data: unknown }> = [];
 
 	agentBrowserExtension({
+		appendEntry(customType, data) {
+			appendedEntries.push({ customType, data });
+			branch.push({ type: "custom", customType, data });
+			options.onAppendEntry?.(customType, data);
+		},
 		on(event, handler) {
 			const existingHandlers = handlers.get(event) ?? [];
 			existingHandlers.push(handler as (...args: unknown[]) => unknown);
@@ -410,6 +418,7 @@ export function createExtensionHarness(options: {
 	} as const;
 
 	return {
+		appendedEntries,
 		ctx,
 		getTool(name: string) {
 			return registeredTools.get(name);
@@ -452,8 +461,9 @@ export async function executeRegisteredTool(
 	tool: NonNullable<ReturnType<typeof createExtensionHarness>["tool"]>,
 	ctx: ReturnType<typeof createExtensionHarness>["ctx"],
 	params: unknown,
+	signal: AbortSignal = new AbortController().signal,
 ) {
-	return (await tool.execute("test-tool-call", params, new AbortController().signal, undefined, ctx)) as {
+	return (await tool.execute("test-tool-call", params, signal, undefined, ctx)) as {
 		content: Array<{ type: string; text?: string }>;
 		details?: Record<string, unknown>;
 		isError?: boolean;
@@ -525,8 +535,20 @@ export async function writeFakeAgentBrowserBinary(
 	scriptBody: string,
 	platform: NodeJS.Platform = processPlatform,
 ): Promise<string> {
+	const defaultSessionInfo = `if (process.env.PI_AGENT_BROWSER_TEST_PRESERVE_INTERNAL_LAUNCH_FLAGS !== "1") {
+  const rawArgsIndex = process.argv.indexOf("--args");
+  if (rawArgsIndex >= 0 && process.argv[rawArgsIndex + 1] === "") process.argv.splice(rawArgsIndex, 2);
+  const fileAccessIndex = process.argv.indexOf("--allow-file-access");
+  if (fileAccessIndex >= 0 && process.argv[fileAccessIndex + 1] === "false") process.argv.splice(fileAccessIndex, 2);
+}
+const __piabFakeArgs = process.argv.slice(2);
+if (process.env.PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO !== "1" && __piabFakeArgs.includes("session") && __piabFakeArgs.includes("info")) {
+  process.stdout.write(JSON.stringify({ success: true, data: { active: false, runtime: null } }));
+  process.exit(0);
+}`;
+	const wrappedScriptBody = `${defaultSessionInfo}\n${scriptBody}`;
 	const scriptPath = join(tempDir, "agent-browser-fake.cjs");
-	await writeFile(scriptPath, `${scriptBody}\n`, "utf8");
+	await writeFile(scriptPath, `${wrappedScriptBody}\n`, "utf8");
 
 	if (platform === "win32") {
 		const launcherPath = join(tempDir, "agent-browser.cmd");
@@ -539,7 +561,7 @@ export async function writeFakeAgentBrowserBinary(
 	}
 
 	const fakeAgentBrowserPath = join(tempDir, "agent-browser");
-	await writeFile(fakeAgentBrowserPath, `#!/usr/bin/env node\n${scriptBody}\n`, "utf8");
+	await writeFile(fakeAgentBrowserPath, `#!/usr/bin/env node\n${wrappedScriptBody}\n`, "utf8");
 	await chmod(fakeAgentBrowserPath, 0o755);
 	return fakeAgentBrowserPath;
 }
@@ -548,6 +570,7 @@ export interface InvocationLogEntry {
 	agentcoreApiKey?: string | null;
 	apiKey?: string | null;
 	args: string[];
+	autosave?: string | null;
 	browserbaseApiKey?: string | null;
 	browserlessApiKey?: string | null;
 	browserUseApiKey?: string | null;

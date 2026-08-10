@@ -1,23 +1,15 @@
 import { cleanupElectronLaunchResources, type ElectronCleanupResult } from "../../electron/cleanup.js";
 import type { ElectronCdpTarget, ElectronLaunchFailure, ElectronLaunchRecord } from "../../electron/launch.js";
-import {
-	getCompiledSemanticActionCommandIndex,
-	getCompiledSemanticActionSessionPrefix,
-	isCompiledSemanticActionFindCommand,
-	redactNetworkSourceLookupSurface,
-	type CompiledAgentBrowserElectron,
-	type CompiledAgentBrowserSemanticAction,
-} from "../../input-modes.js";
-import {
-	buildAgentBrowserNextActions,
-	buildAgentBrowserResultCategoryDetails,
-	type AgentBrowserEnvelope,
-	type AgentBrowserNextAction,
-} from "../../results.js";
+import { getCompiledSemanticActionCommandIndex, getCompiledSemanticActionSessionPrefix, isCompiledSemanticActionFindCommand } from "../../input-modes/semantic-action.js";
+import { redactNetworkSourceLookupSurface } from "../../input-modes/lookups.js";
+import { type CompiledAgentBrowserElectron, type CompiledAgentBrowserSemanticAction } from "../../input-modes/types.js";
+import { buildAgentBrowserNextActions } from "../../results/action-recommendations.js";
+import { buildAgentBrowserResultCategoryDetails } from "../../results/categories.js";
+import { type AgentBrowserEnvelope, type AgentBrowserNextAction } from "../../results/contracts.js";
 import { formatSessionArtifactRetentionSummary } from "../../results/artifact-manifest.js";
 import {
-	AgentBrowserNextActionCollector,
 	alignPageChangeSummaryNextActionIds,
+	appendUniqueAgentBrowserNextActions,
 	applyNamespaceToNextActions,
 	isStandaloneSnapshotNextAction,
 	withOptionalSessionArgs,
@@ -43,7 +35,8 @@ import {
 	type SessionRefSnapshot,
 	type SessionRefSnapshotInvalidation,
 } from "../../session-page-state.js";
-import { extractExplicitSessionName, redactInvocationArgs, redactSensitiveText, redactSensitiveValue, type OpenResultTabCorrection } from "../../runtime.js";
+import { extractExplicitSessionName } from "../../argv-grammar.js";
+import { redactInvocationArgs, redactSensitiveText, redactSensitiveValue, type OpenResultTabCorrection } from "../../runtime.js";
 import { isRecord } from "../../parsing.js";
 import { buildClickDispatchNextActions, formatClickDispatchDiagnosticText } from "./click-dispatch.js";
 import {
@@ -172,7 +165,8 @@ export function buildJsonVisibleContent(options: {
 	return [{ type: "text", text: JSON.stringify(payload, null, 2) }, ...images];
 }
 
-export function getElectronLaunchFailureCategory(failure: ElectronLaunchFailure): "policy-blocked" | "timeout" | "upstream-error" | "validation-error" {
+export function getElectronLaunchFailureCategory(failure: ElectronLaunchFailure): "aborted" | "policy-blocked" | "timeout" | "upstream-error" | "validation-error" {
+	if (failure.reason === "aborted") return "aborted";
 	if (failure.reason === "policy-blocked") return "policy-blocked";
 	if (failure.reason === "timeout") return "timeout";
 	if (failure.reason === "non-electron-target") return "validation-error";
@@ -197,14 +191,14 @@ function formatElectronLaunchFailureDiagnostics(failure: ElectronLaunchFailure |
 	if (diagnostics.cdpVersionReached === false) lines.push("- CDP /json/version: did not return a valid payload before timeout.");
 	if (diagnostics.timeoutMs !== undefined || diagnostics.elapsedMs !== undefined) lines.push(`- Timing: ${diagnostics.elapsedMs ?? "unknown"}ms elapsed${diagnostics.timeoutMs !== undefined ? ` of ${diagnostics.timeoutMs}ms timeout` : ""}.`);
 	if (diagnostics.outputCaptured === false) lines.push("- App stdout/stderr: not captured by this wrapper launch path.");
-	lines.push("Retry guidance: increase electron.timeoutMs, try targetType:'any', pass an explicit appPath/executablePath, quit any already-running singleton instance, then retry launch.");
+	if (failure?.reason !== "aborted") lines.push("Retry guidance: increase electron.timeoutMs, try targetType:'any', pass an explicit appPath/executablePath, quit any already-running singleton instance, then retry launch.");
 	return lines.join("\n");
 }
 
 export function buildElectronHostFailureResult(options: {
 	compiledElectron: CompiledAgentBrowserElectron;
 	errorText: string;
-	failureCategory?: "cleanup-failed" | "policy-blocked" | "timeout" | "upstream-error" | "validation-error";
+	failureCategory?: "aborted" | "cleanup-failed" | "policy-blocked" | "timeout" | "upstream-error" | "validation-error";
 	launchFailure?: ElectronLaunchFailure;
 	managedSessionOutcome?: ManagedSessionOutcome;
 	status?: string;
@@ -356,39 +350,57 @@ function buildDialogTimeoutNextActions(options: { command?: string; sessionName?
 }
 
 function buildResultNextActions(options: FinalResultInput): AgentBrowserNextAction[] | undefined {
-	const nextActionCollector = new AgentBrowserNextActionCollector(options.presentation.nextActions);
-	if (options.categoryDetails.resultCategory === "success" && options.executionPlan.commandInfo.command === "connect" && !options.electronLaunchRecord) nextActionCollector.appendUnique(buildConnectedSessionNextActions(options.executionPlan.sessionName));
-	if (options.noActivePageSnapshotFailure) nextActionCollector.appendUnique(buildNoActivePageNextActions(options.executionPlan.sessionName));
+	let nextActions = options.presentation.nextActions ? [...options.presentation.nextActions] : [];
+	const append = (actions: AgentBrowserNextAction[] | undefined): void => {
+		if (actions && actions.length > 0) nextActions.push(...actions);
+	};
+	const appendUnique = (actions: AgentBrowserNextAction[] | undefined): void => {
+		appendUniqueAgentBrowserNextActions(nextActions, actions);
+	};
+	if (options.categoryDetails.resultCategory === "success" && options.executionPlan.commandInfo.command === "connect" && !options.electronLaunchRecord) appendUnique(buildConnectedSessionNextActions(options.executionPlan.sessionName));
+	if (options.noActivePageSnapshotFailure) appendUnique(buildNoActivePageNextActions(options.executionPlan.sessionName));
 	if (options.aboutBlankSessionMismatch) {
-		nextActionCollector.appendUnique(buildSessionTabRecoveryNextActions({ kind: "about-blank", recoveryApplied: options.aboutBlankSessionMismatch.recoveryApplied, sessionName: options.executionPlan.sessionName, tabCorrection: options.aboutBlankSessionMismatch.recoveryApplied ? options.sessionTabCorrection : undefined, target: { title: options.aboutBlankSessionMismatch.targetTitle, url: options.aboutBlankSessionMismatch.targetUrl } }));
-		if (!options.aboutBlankSessionMismatch.recoveryApplied) nextActionCollector.removeWhere(isStandaloneSnapshotNextAction);
-	} else if (options.categoryDetails.resultCategory === "success" && (options.sessionTabCorrection || options.openResultTabCorrection)) nextActionCollector.appendUnique(buildSessionTabRecoveryNextActions({ kind: "tab-drift", recoveryApplied: true, sessionName: options.executionPlan.sessionName, tabCorrection: options.sessionTabCorrection ?? options.openResultTabCorrection, target: options.currentSessionTabTarget ?? options.priorSessionTabTarget }));
-	if (options.categoryDetails.failureCategory === "stale-ref") nextActionCollector.replace(buildSessionAwareStaleRefNextActions(options.executionPlan.sessionName));
-	if (options.visibleRefFallbackDiagnostic) nextActionCollector.append(buildVisibleRefFallbackNextActions({ diagnostic: options.visibleRefFallbackDiagnostic, sessionName: options.visibleRefFallbackSessionName }));
-	if (options.richInputRecoveryDiagnostic) nextActionCollector.append(buildRichInputRecoveryNextActions({ diagnostic: options.richInputRecoveryDiagnostic, sessionName: options.visibleRefFallbackSessionName }));
-	if (options.electronPostCommandHealth) { const electronRecord = options.electronLaunchRecords.get(options.electronPostCommandHealth.launchId); if (electronRecord) nextActionCollector.appendUnique(buildElectronLifecycleNextActions(electronRecord)); }
-	if (options.electronSessionMismatch) { const electronRecord = options.electronLaunchRecords.get(options.electronSessionMismatch.launchId); if (electronRecord) nextActionCollector.appendUnique(buildElectronMismatchNextActions(electronRecord, options.electronSessionMismatch.liveTarget)); }
+		appendUnique(buildSessionTabRecoveryNextActions({ kind: "about-blank", recoveryApplied: options.aboutBlankSessionMismatch.recoveryApplied, sessionName: options.executionPlan.sessionName, tabCorrection: options.aboutBlankSessionMismatch.recoveryApplied ? options.sessionTabCorrection : undefined, target: { title: options.aboutBlankSessionMismatch.targetTitle, url: options.aboutBlankSessionMismatch.targetUrl } }));
+		if (!options.aboutBlankSessionMismatch.recoveryApplied) nextActions = nextActions.filter((action) => !isStandaloneSnapshotNextAction(action));
+	} else if (options.categoryDetails.resultCategory === "success" && (options.sessionTabCorrection || options.openResultTabCorrection)) appendUnique(buildSessionTabRecoveryNextActions({ kind: "tab-drift", recoveryApplied: true, sessionName: options.executionPlan.sessionName, tabCorrection: options.sessionTabCorrection ?? options.openResultTabCorrection, target: options.currentSessionTabTarget ?? options.priorSessionTabTarget }));
+	if (options.categoryDetails.failureCategory === "stale-ref") nextActions = [...buildSessionAwareStaleRefNextActions(options.executionPlan.sessionName)];
+	if (options.visibleRefFallbackDiagnostic) append(buildVisibleRefFallbackNextActions({ diagnostic: options.visibleRefFallbackDiagnostic, sessionName: options.visibleRefFallbackSessionName }));
+	if (options.richInputRecoveryDiagnostic) append(buildRichInputRecoveryNextActions({ diagnostic: options.richInputRecoveryDiagnostic, sessionName: options.visibleRefFallbackSessionName }));
+	if (options.electronPostCommandHealth) { const electronRecord = options.electronLaunchRecords.get(options.electronPostCommandHealth.launchId); if (electronRecord) appendUnique(buildElectronLifecycleNextActions(electronRecord)); }
+	if (options.electronSessionMismatch) { const electronRecord = options.electronLaunchRecords.get(options.electronSessionMismatch.launchId); if (electronRecord) appendUnique(buildElectronMismatchNextActions(electronRecord, options.electronSessionMismatch.liveTarget)); }
 	if (options.categoryDetails.failureCategory === "selector-not-found" && options.redactedCompiledSemanticAction) {
 		const candidateActions = buildSemanticActionCandidateActions(options.redactedCompiledSemanticAction);
-		if (candidateActions.length > 0) nextActionCollector.append(candidateActions);
+		if (candidateActions.length > 0) append(candidateActions);
 	}
-	if (options.overlayBlockerDiagnostic) nextActionCollector.append(buildOverlayBlockerNextActions({ diagnostic: options.overlayBlockerDiagnostic, sessionName: options.executionPlan.sessionName }));
-	if (options.fillVerificationDiagnostic) nextActionCollector.appendUnique(buildFillVerificationNextActions(options.fillVerificationDiagnostic, options.executionPlan.sessionName));
-	if (options.electronRefFreshnessDiagnostic) nextActionCollector.appendUnique(buildElectronRefFreshnessNextActions(options.executionPlan.sessionName));
-	if (options.selectorTextVisibilityDiagnostics.length > 0) nextActionCollector.append(buildSelectorTextVisibilityNextActions({ diagnostics: options.selectorTextVisibilityDiagnostics, sessionName: options.executionPlan.sessionName }));
-	if (options.electronBroadGetTextScopeDiagnostics.length > 0) nextActionCollector.append(buildElectronBroadGetTextScopeNextActions({ diagnostics: options.electronBroadGetTextScopeDiagnostics, sessionName: options.executionPlan.sessionName }));
-	if (options.sourceLookup?.electronContext) nextActionCollector.appendUnique(buildSourceLookupElectronNextActions(options.sourceLookup));
-	if (options.clickDispatchDiagnostic) nextActionCollector.append(buildClickDispatchNextActions({ commandTokens: options.commandTokens, diagnostic: options.clickDispatchDiagnostic, sessionName: options.executionPlan.sessionName }));
-	if (options.scrollNoopDiagnostic) nextActionCollector.append(buildScrollNoopNextActions(options.executionPlan.sessionName));
-	if (options.comboboxFocusDiagnostic) nextActionCollector.append(buildComboboxFocusNextActions(options.executionPlan.sessionName));
-	if (options.managedSessionOutcome) nextActionCollector.appendUnique(buildManagedSessionFreshFailureNextActions(options.managedSessionOutcome));
+	if (options.overlayBlockerDiagnostic) append(buildOverlayBlockerNextActions({ diagnostic: options.overlayBlockerDiagnostic, sessionName: options.executionPlan.sessionName }));
+	if (options.fillVerificationDiagnostic) appendUnique(buildFillVerificationNextActions(options.fillVerificationDiagnostic, options.executionPlan.sessionName));
+	if (options.electronRefFreshnessDiagnostic) appendUnique(buildElectronRefFreshnessNextActions(options.executionPlan.sessionName));
+	if (options.selectorTextVisibilityDiagnostics.length > 0) append(buildSelectorTextVisibilityNextActions({ diagnostics: options.selectorTextVisibilityDiagnostics, sessionName: options.executionPlan.sessionName }));
+	if (options.electronBroadGetTextScopeDiagnostics.length > 0) append(buildElectronBroadGetTextScopeNextActions({ diagnostics: options.electronBroadGetTextScopeDiagnostics, sessionName: options.executionPlan.sessionName }));
+	if (options.sourceLookup?.electronContext) appendUnique(buildSourceLookupElectronNextActions(options.sourceLookup));
+	if (options.clickDispatchDiagnostic) append(buildClickDispatchNextActions({ commandTokens: options.commandTokens, diagnostic: options.clickDispatchDiagnostic, sessionName: options.executionPlan.sessionName }));
+	if (options.scrollNoopDiagnostic) append(buildScrollNoopNextActions(options.executionPlan.sessionName));
+	if (options.comboboxFocusDiagnostic) append(buildComboboxFocusNextActions(options.executionPlan.sessionName));
+	if (options.managedSessionOutcome) appendUnique(buildManagedSessionFreshFailureNextActions(options.managedSessionOutcome));
 	if (options.categoryDetails.failureCategory === "timeout" && options.processResult.timedOut) {
-		nextActionCollector.appendUnique(buildTimeoutPartialProgressNextActions(options));
-		nextActionCollector.appendUnique(buildDialogTimeoutNextActions({ command: options.executionPlan.commandInfo.command, sessionName: options.executionPlan.sessionName }));
+		appendUnique(buildTimeoutPartialProgressNextActions(options));
+		appendUnique(buildDialogTimeoutNextActions({ command: options.executionPlan.commandInfo.command, sessionName: options.executionPlan.sessionName }));
 	}
-	if (options.categoryDetails.failureCategory === "stale-ref" && options.redactedCompiledSemanticAction && isCompiledSemanticActionFindCommand(options.compiledSemanticAction)) nextActionCollector.append([{ id: "retry-semantic-action-after-stale-ref", params: { args: options.redactedCompiledSemanticAction.args }, reason: "Retry the same semantic target via its compiled find command after the upstream stale-ref failure proves the prior action did not execute.", safety: "Use only for the same intended target; direct stale @refs still require a fresh snapshot or stable locator before retrying.", tool: "agent_browser" as const }]);
-	if (options.electronLaunchRecord) nextActionCollector.append(buildAgentBrowserNextActions({ electron: { launchId: options.electronLaunchRecord.launchId, sessionName: options.electronLaunchRecord.sessionName, status: options.electronLaunchRecord.cleanupState }, failureCategory: options.categoryDetails.failureCategory, resultCategory: options.categoryDetails.resultCategory, successCategory: options.categoryDetails.successCategory }));
-	return nextActionCollector.toArray();
+	if (options.categoryDetails.failureCategory === "stale-ref" && options.redactedCompiledSemanticAction && isCompiledSemanticActionFindCommand(options.compiledSemanticAction)) append([{ id: "retry-semantic-action-after-stale-ref", params: { args: options.redactedCompiledSemanticAction.args }, reason: "Retry the same semantic target via its compiled find command after the upstream stale-ref failure proves the prior action did not execute.", safety: "Use only for the same intended target; direct stale @refs still require a fresh snapshot or stable locator before retrying.", tool: "agent_browser" as const }]);
+	if (options.electronLaunchRecord) append(buildAgentBrowserNextActions({ electron: { launchId: options.electronLaunchRecord.launchId, sessionName: options.electronLaunchRecord.sessionName, status: options.electronLaunchRecord.cleanupState }, failureCategory: options.categoryDetails.failureCategory, resultCategory: options.categoryDetails.resultCategory, successCategory: options.categoryDetails.successCategory }));
+	return nextActions.length > 0 ? nextActions : undefined;
+}
+
+function formatFailureNextActionsText(options: FinalResultInput, nextActions: AgentBrowserNextAction[] | undefined): string | undefined {
+	if (options.categoryDetails.resultCategory !== "failure" || !nextActions || nextActions.length === 0) return undefined;
+	const lines = nextActions.slice(0, 6).map((action) => {
+		const params = action.params
+			? { ...action.params, ...(action.params.stdin === undefined ? {} : { stdin: "[omitted; use details.nextActions]" }) }
+			: undefined;
+		const payload = action.artifactPath ? { artifactPath: action.artifactPath } : params;
+		return `- ${action.id}${payload ? ` ${JSON.stringify(payload)}` : ""}: ${action.reason}`;
+	});
+	return ["Next actions:", ...lines, "Use the exact redacted payloads in details.nextActions when available."].join("\n");
 }
 
 function buildAgentBrowserResultDetails(options: FinalResultInput, nextActions: AgentBrowserNextAction[] | undefined): Record<string, unknown> {
@@ -429,6 +441,8 @@ function buildAgentBrowserResultDetails(options: FinalResultInput, nextActions: 
 		fullOutputPath: options.parseFailureOutput.fullOutputPath ?? options.presentation.fullOutputPath,
 		fullOutputPaths: options.presentation.fullOutputPaths,
 		fullOutputUnavailable: options.parseFailureOutput.fullOutputUnavailable,
+		managedSessionHeadedAutosaveDisabled: options.managedSessionHeadedAutosaveDisabled,
+		managedSessionHeadedAutosaveInterval: options.managedSessionHeadedAutosaveInterval,
 		managedSessionOutcome: options.managedSessionOutcome,
 		imagePath: options.presentation.imagePath,
 		imagePaths: options.presentation.imagePaths,
@@ -460,14 +474,15 @@ function buildAgentBrowserResultDetails(options: FinalResultInput, nextActions: 
 		sessionMode: options.sessionMode,
 		sessionTabCorrection: options.sessionTabCorrection,
 		sessionTabTarget: options.currentSessionTabTarget,
+		sessionTabTargetUnknown: options.currentSessionTabTargetUnknown,
 		refSnapshot: options.currentRefSnapshot,
 		refSnapshotInvalidation: options.currentRefSnapshotInvalidation,
 		namespace: options.executionPlan.namespace,
-		...buildSessionDetailFields(options.executionPlan.sessionName, options.executionPlan.usedImplicitSession),
+		...buildSessionDetailFields(options.executionPlan.sessionName, options.executionPlan.usedImplicitSession, options.executionPlan.namespace, options.managedSessionRestoreDisabled),
 		sessionRecoveryHint: options.redactedRecoveryHint,
 		startupScopedFlags: options.executionPlan.startupScopedFlags,
 		stderr: options.processResult.stderr,
-		stdout: options.plainTextInspection ? options.inspectionText ?? "" : options.parseSucceeded ? undefined : options.processResult.stdout,
+		stdout: options.plainTextInspection ? options.inspectionText ?? "" : undefined,
 		summary: options.presentation.summary,
 		timedOut: options.processResult.timedOut || undefined,
 		timeoutMs: options.processResult.timeoutMs,
@@ -494,7 +509,8 @@ export function buildFinalAgentBrowserToolResult(options: FinalResultInput): Age
 	const artifactCleanupText = formatArtifactCleanupGuidanceText(options.artifactCleanup);
 	const timeoutPartialProgressText = options.timeoutPartialProgress ? formatTimeoutPartialProgressText(options.timeoutPartialProgress) : undefined;
 	const managedSessionOutcomeText = formatManagedSessionOutcomeText(options.managedSessionOutcome);
-	const rawAppendedDiagnosticText = [visibleRefFallbackText, richInputRecoveryText, semanticActionCandidateText, clickDispatchText, overlayBlockerText, fillVerificationText, electronRefFreshnessText, selectorTextVisibilityText, electronBroadGetTextScopeText, scrollNoopDiagnosticText, comboboxFocusDiagnosticText, recordingDependencyWarningText, evalStdinHintText, evalResultWarningText, artifactCleanupText, timeoutPartialProgressText, managedSessionOutcomeText].filter((item): item is string => item !== undefined).join("\n\n");
+	const failureNextActionsText = formatFailureNextActionsText(options, nextActions);
+	const rawAppendedDiagnosticText = [visibleRefFallbackText, richInputRecoveryText, semanticActionCandidateText, clickDispatchText, overlayBlockerText, fillVerificationText, electronRefFreshnessText, selectorTextVisibilityText, electronBroadGetTextScopeText, scrollNoopDiagnosticText, comboboxFocusDiagnosticText, recordingDependencyWarningText, evalStdinHintText, evalResultWarningText, artifactCleanupText, timeoutPartialProgressText, managedSessionOutcomeText, failureNextActionsText].filter((item): item is string => item !== undefined).join("\n\n");
 	const appendedDiagnosticText = redactSensitiveText(redactExactSensitiveText(rawAppendedDiagnosticText, options.exactSensitiveValues));
 	const shouldAppendDiagnosticText = appendedDiagnosticText.length > 0 && (!options.userRequestedJson || options.plainTextInspection);
 	let content = shouldAppendDiagnosticText && options.redactedContent[0]?.type === "text" ? [{ ...options.redactedContent[0], text: `${options.redactedContent[0].text}\n\n${appendedDiagnosticText}` }, ...options.redactedContent.slice(1)] : options.redactedContent;
@@ -505,8 +521,15 @@ export function buildFinalAgentBrowserToolResult(options: FinalResultInput): Age
 	return options.compiledNetworkSourceLookup ? redactNetworkSourceLookupSurface(result) as typeof result : result;
 }
 
+export function isMissingAgentBrowserBinary(
+	processResult: FinalResultInput["processResult"],
+): processResult is FinalResultInput["processResult"] & { spawnError: Error } {
+	return processResult.spawnError?.message.includes("ENOENT") === true;
+}
+
 export async function buildMissingBinaryFailureResult(options: { compatibilityWorkaround?: FinalResultInput["compatibilityWorkaround"]; electronLaunch?: FinalResultInput["electronLaunch"]; executionPlan: AgentBrowserExecutionPlan; implicitSessionCloseTimeoutMs: number; managedSessionActive: boolean; managedSessionName: string; managedSessionNamespace?: string; processResult: FinalResultInput["processResult"]; redactedArgs: string[]; redactedProcessArgs: string[]; sessionMode: "auto" | "fresh"; sessionTabCorrection?: FinalResultInput["sessionTabCorrection"] }): Promise<AgentBrowserToolResult | undefined> {
-	if (!options.processResult.spawnError?.message.includes("ENOENT")) return undefined;
+	if (!isMissingAgentBrowserBinary(options.processResult)) return undefined;
+	const spawnError = options.processResult.spawnError.message;
 	const errorText = buildMissingBinaryMessage();
 	const managedSessionOutcome = buildManagedSessionOutcome({ activeAfter: options.managedSessionActive, activeBefore: options.managedSessionActive, attemptedSessionName: options.executionPlan.managedSessionName, command: options.executionPlan.commandInfo.command, currentSessionName: options.managedSessionName, currentSessionNamespace: options.managedSessionNamespace, previousSessionName: options.managedSessionName, sessionMode: options.sessionMode, succeeded: false });
 	const managedSessionOutcomeText = formatManagedSessionOutcomeText(managedSessionOutcome);
@@ -518,5 +541,5 @@ export async function buildMissingBinaryFailureResult(options: { compatibilityWo
 		missingBinaryElectronRecord = missingBinaryElectronCleanup.record;
 	}
 	const textParts = [errorText, managedSessionOutcomeText, missingBinaryElectronCleanup ? `Electron cleanup after failed attach: ${missingBinaryElectronCleanup.summary}` : undefined].filter((part): part is string => part !== undefined && part.length > 0);
-	return { content: [{ type: "text", text: textParts.join("\n\n") }], details: { args: options.redactedArgs, compatibilityWorkaround: options.compatibilityWorkaround, effectiveArgs: options.redactedProcessArgs, electron: missingBinaryElectronRecord ? { action: "launch" as const, cleanup: missingBinaryElectronCleanup, launch: missingBinaryElectronRecord, status: "failed" as const, targets: options.electronLaunch?.targets, version: options.electronLaunch?.version } : undefined, managedSessionOutcome, namespace: options.executionPlan.namespace, nextActions: managedSessionRecoveryNextActions.length > 0 ? managedSessionRecoveryNextActions : undefined, sessionMode: options.sessionMode, sessionTabCorrection: options.sessionTabCorrection, ...buildAgentBrowserResultCategoryDetails({ args: options.redactedProcessArgs, command: options.executionPlan.commandInfo.command, errorText, failureCategory: "missing-binary", spawnError: options.processResult.spawnError.message, succeeded: false }), spawnError: options.processResult.spawnError.message }, isError: true };
+	return { content: [{ type: "text", text: textParts.join("\n\n") }], details: { args: options.redactedArgs, compatibilityWorkaround: options.compatibilityWorkaround, effectiveArgs: options.redactedProcessArgs, electron: missingBinaryElectronRecord ? { action: "launch" as const, cleanup: missingBinaryElectronCleanup, launch: missingBinaryElectronRecord, status: "failed" as const, targets: options.electronLaunch?.targets, version: options.electronLaunch?.version } : undefined, managedSessionOutcome, namespace: options.executionPlan.namespace, nextActions: managedSessionRecoveryNextActions.length > 0 ? managedSessionRecoveryNextActions : undefined, sessionMode: options.sessionMode, sessionTabCorrection: options.sessionTabCorrection, ...buildAgentBrowserResultCategoryDetails({ args: options.redactedProcessArgs, command: options.executionPlan.commandInfo.command, errorText, failureCategory: "missing-binary", spawnError, succeeded: false }), spawnError }, isError: true };
 }

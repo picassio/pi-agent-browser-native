@@ -1,11 +1,3 @@
-/**
- * Purpose: Centralize recovery-oriented nextAction ids and action construction.
- * Responsibilities: Build tab/about:blank/no-active-page/connected-session follow-ups and rich-input recovery ids.
- * Scope: Recovery action contracts only; result category classification and artifact follow-ups live elsewhere.
- * Usage: Imported by shared result action builders and the extension entrypoint.
- * Invariants/Assumptions: Ids are public machine-readable contracts mirrored by docs and tests.
- */
-
 import { buildNextToolAction, type AgentBrowserNextAction, withOptionalSessionArgs } from "./next-actions.js";
 
 export type AgentBrowserRecoveryKind = "about-blank" | "connected-session" | "no-active-page" | "tab-drift";
@@ -21,6 +13,7 @@ export interface AgentBrowserRecoveryContext {
 
 export const AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS = {
 	aboutBlankListTabs: "list-tabs-for-about-blank-recovery",
+	connectedSessionGetUrl: "verify-connected-session-url",
 	connectedSessionListTabs: "list-connected-session-tabs",
 	genericTabDriftListTabs: "list-tabs-for-recovery",
 	noActivePageListTabs: "list-tabs-after-no-active-page",
@@ -93,6 +86,12 @@ export function buildRecoveryNextActions(recovery: AgentBrowserRecoveryContext):
 	const sessionArgs = (args: string[]) => withOptionalSessionArgs(recovery.sessionName, args);
 	if (recovery.kind === "connected-session") {
 		return [
+			buildNextToolAction({
+				args: sessionArgs(["get", "url"]),
+				id: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.connectedSessionGetUrl,
+				reason: "Verify the attached page URL before any page-content inspection.",
+				safety: "Read-only URL lookup. The wrapper keeps page inspection blocked if the active target is a local file page or the URL cannot be verified.",
+			}),
 			buildNextToolAction({
 				args: sessionArgs(["tab", "list"]),
 				id: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.connectedSessionListTabs,

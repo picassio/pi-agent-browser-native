@@ -1,13 +1,13 @@
-/**
- * Purpose: Own persistent session artifact manifest merge, retention, and validation logic.
- * Responsibilities: Parse manifest bounds, recognize manifest entries, merge new artifact rows, and format retention summaries.
- * Scope: Manifest accounting only; artifact detection and presentation live in presentation modules.
- * Usage: Imported by presentation and snapshot artifact persistence paths.
- * Invariants/Assumptions: Explicit-path artifacts are host-owned while persistent-session spill files are bounded by the manifest cap.
- */
-
 import { isRecord } from "../parsing.js";
-import type { SessionArtifactManifest, SessionArtifactManifestEntry } from "./contracts.js";
+import type { FileArtifactKind, FileArtifactMetadata, SessionArtifactManifest, SessionArtifactManifestEntry } from "./contracts.js";
+
+export function isPendingRecordingCommand(command: string | undefined, subcommand: string | undefined, kind: FileArtifactKind | undefined): boolean {
+	return command === "record" && (subcommand === "start" || subcommand === "restart") && kind === "video";
+}
+
+export function isPendingRecordingArtifact(artifact: FileArtifactMetadata): boolean {
+	return isPendingRecordingCommand(artifact.command, artifact.subcommand, artifact.kind);
+}
 
 export const SESSION_ARTIFACT_MANIFEST_VERSION = 1;
 export const SESSION_ARTIFACT_MANIFEST_MAX_ENTRIES_ENV = "PI_AGENT_BROWSER_SESSION_ARTIFACT_MANIFEST_MAX_ENTRIES";
@@ -69,6 +69,10 @@ export function formatSessionArtifactRetentionSummary(manifest: SessionArtifactM
 	return `Session artifacts: ${parts.join(", ")} (${manifest.entries.length}/${manifest.maxEntries} recent).`;
 }
 
+export function getSessionArtifactManifestEntryKey(entry: SessionArtifactManifestEntry): string {
+	return entry.storageScope === "explicit-path" && entry.absolutePath ? `${entry.storageScope}:${entry.absolutePath}` : `${entry.storageScope}:${entry.path}`;
+}
+
 export function mergeSessionArtifactManifest(options: {
 	base?: SessionArtifactManifest;
 	entries?: SessionArtifactManifestEntry[];
@@ -76,14 +80,12 @@ export function mergeSessionArtifactManifest(options: {
 }): SessionArtifactManifest | undefined {
 	const nowMs = options.nowMs ?? Date.now();
 	const maxEntries = getSessionArtifactManifestMaxEntries();
-	const getEntryKey = (entry: SessionArtifactManifestEntry) =>
-		entry.storageScope === "explicit-path" && entry.absolutePath ? `${entry.storageScope}:${entry.absolutePath}` : `${entry.storageScope}:${entry.path}`;
 	const byPath = new Map<string, SessionArtifactManifestEntry>();
 	for (const entry of options.base?.entries ?? []) {
-		byPath.set(getEntryKey(entry), entry);
+		byPath.set(getSessionArtifactManifestEntryKey(entry), entry);
 	}
 	for (const entry of options.entries ?? []) {
-		const key = getEntryKey(entry);
+		const key = getSessionArtifactManifestEntryKey(entry);
 		const existing = byPath.get(key);
 		byPath.set(key, {
 			...existing,

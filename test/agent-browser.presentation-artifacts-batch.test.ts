@@ -12,9 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import {
-	buildToolPresentation
-} from "../extensions/agent-browser/lib/results.js";
+import { parseUserBatchStdin } from "../extensions/agent-browser/lib/orchestration/batch-stdin.js";
+import { buildToolPresentation } from "../extensions/agent-browser/lib/results/presentation.js";
 import type {
 	SessionArtifactManifest,
 	SessionArtifactManifestEntry,
@@ -27,6 +26,12 @@ import {
 import {
 	withPatchedEnv
 } from "./helpers/agent-browser-harness.js";
+
+test("batch stdin shape errors include a copyable native-tool example", () => {
+	const error = parseUserBatchStdin(JSON.stringify([{ action: "get", target: "title" }])).error ?? "";
+	assert.match(error, /must be a non-empty array of string command tokens/);
+	assert.match(error, /\{ "args": \["batch"\], "stdin": "\[\[\\"get\\",\\"title\\"\],\[\\"get\\",\\"url\\"\]\]" \}/);
+});
 
 test("buildToolPresentation formats download results as saved-file summaries", async () => {
 	const presentation = await buildToolPresentation({

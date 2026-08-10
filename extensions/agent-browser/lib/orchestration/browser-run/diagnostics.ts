@@ -3,17 +3,18 @@ import { isAbsolute, resolve } from "node:path";
 
 import { isCloseCommand, isOpenNavigationCommand } from "../../command-taxonomy.js";
 import type { ElectronLaunchRecord } from "../../electron/launch.js";
-import { boundElectronProbeString } from "../../electron/text.js";
+import { boundElectronProbeString } from "../../electron/cdp.js";
 import { executableExistsOnPath } from "../../executable-path.js";
-import type { AgentBrowserSourceLookupAnalysis, CompiledAgentBrowserJob, CompiledAgentBrowserSemanticAction } from "../../input-modes.js";
+import type { AgentBrowserSourceLookupAnalysis, CompiledAgentBrowserJob, CompiledAgentBrowserSemanticAction } from "../../input-modes/types.js";
 import { isHttpOrHttpsUrl } from "../../input-modes/job.js";
-import type { AgentBrowserNextAction } from "../../results.js";
+import type { AgentBrowserNextAction } from "../../results/contracts.js";
 import { formatSessionArtifactRetentionSummary } from "../../results/artifact-manifest.js";
 import { buildNextToolAction, withOptionalSessionArgs } from "../../results/next-actions.js";
 import { buildVisibleRefFallbackDiagnosticFromSnapshot, getVisibleRefFallbackTarget, type VisibleRefFallbackDiagnostic } from "../../results/selector-recovery.js";
 import { extractRefSnapshotFromData, normalizeComparableUrl, type SessionRefSnapshot, type SessionTabTarget } from "../../session-page-state.js";
 import { redactInvocationArgs, redactSensitiveText, type CommandInfo } from "../../runtime.js";
 import { isRecord } from "../../parsing.js";
+import { getManagedSessionStateAccessValidationError, isFileUrl } from "../../managed-session-state-policy.js";
 import {
 	extractBatchResultCommand,
 	extractNavigationSummaryFromData,
@@ -58,16 +59,10 @@ export async function collectNavigationSummary(options: {
 	signal?: AbortSignal;
 }): Promise<NavigationSummary | undefined> {
 	const url = extractStringResultField(await runSessionCommandData({ args: ["get", "url"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal }), "url");
+	if (!url || !/^[a-z][a-z0-9+.-]*:/i.test(url)) return undefined;
+	if (isFileUrl(url)) return { url };
 	const title = extractStringResultField(await runSessionCommandData({ args: ["get", "title"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal }), "title");
-	if (url && /^[a-z][a-z0-9+.-]*:/i.test(url)) return { title, url };
-	return extractNavigationSummaryFromData(await runSessionCommandData({
-		args: ["eval", "--stdin"],
-		cwd: options.cwd,
-		namespace: options.namespace,
-		sessionName: options.sessionName,
-		signal: options.signal,
-		stdin: `({ title: document.title, url: location.href })`,
-	}));
+	return { title, url };
 }
 
 function extractScrollPositionSnapshot(data: unknown): ScrollPositionSnapshot | undefined {
@@ -498,8 +493,9 @@ export function formatEvalResultWarningText(warning: ReturnType<typeof getEvalRe
 }
 
 export async function getArtifactCleanupGuidance(options: { command?: string; cwd: string; manifest?: SessionArtifactManifest; succeeded: boolean }): Promise<ArtifactCleanupGuidance | undefined> {
-	if (!options.succeeded || !isCloseCommand(options.command) || !options.manifest || options.manifest.entries.length === 0) return undefined;
+	if (!options.succeeded || !isCloseCommand(options.command) || !options.manifest) return undefined;
 	const explicitEntries = options.manifest.entries.filter((entry) => entry.storageScope === "explicit-path");
+	if (explicitEntries.length === 0) return undefined;
 	const explicitArtifactPaths: string[] = [];
 	const seenPaths = new Set<string>();
 	for (const entry of explicitEntries) {
@@ -511,20 +507,18 @@ export async function getArtifactCleanupGuidance(options: { command?: string; cw
 		seenPaths.add(displayPath);
 		explicitArtifactPaths.push(displayPath);
 	}
+	if (explicitArtifactPaths.length === 0) return undefined;
 	return { explicitArtifactPaths, note: "Closing the browser session does not delete explicit screenshots, downloads, PDFs, traces, HAR files, or recordings; clean existing paths with host file tools when no longer needed.", owner: "host-file-tools", summary: formatSessionArtifactRetentionSummary(options.manifest) };
 }
 
 export function formatArtifactCleanupGuidanceText(guidance: ArtifactCleanupGuidance | undefined): string | undefined {
-	if (!guidance) return undefined;
+	if (!guidance || guidance.explicitArtifactPaths.length === 0) return undefined;
 	const explicitCount = guidance.explicitArtifactPaths.length;
-	const explicitSummary = explicitCount === 0
-		? "No existing explicit artifact paths were found in the recent manifest."
-		: `${explicitCount} explicit artifact${explicitCount === 1 ? "" : "s"} remain${explicitCount === 1 ? "s" : ""}; expand or inspect details.artifactCleanup.explicitArtifactPaths for paths.`;
-	return `Artifact lifecycle: ${explicitSummary} Browser close does not delete explicit screenshots, downloads, PDFs, traces, HAR files, or recordings; use host file tools for cleanup.`;
+	return `Artifact lifecycle: ${explicitCount} explicit artifact${explicitCount === 1 ? "" : "s"} remain${explicitCount === 1 ? "s" : ""}; expand or inspect details.artifactCleanup.explicitArtifactPaths for paths. Browser close does not delete explicit screenshots, downloads, PDFs, traces, HAR files, or recordings; use host file tools for cleanup.`;
 }
 
-async function collectManagedSessionCommandData(options: { args: string[]; cwd: string; namespace?: string; sessionName: string; signal?: AbortSignal; timeoutMs?: number }): Promise<{ data?: unknown; error?: string }> {
-	try { return { data: await runSessionCommandData(options) }; } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
+async function collectManagedSessionCommandData(options: { allowManagedSessionTarget?: boolean; args: string[]; cwd: string; namespace?: string; sessionName: string; signal?: AbortSignal; timeoutMs?: number }): Promise<{ data?: unknown; error?: string }> {
+	try { return { data: await runSessionCommandData({ ...options, pinNamespace: true }) }; } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
 }
 
 async function collectElectronManagedSessionUrl(options: { cwd: string; namespace?: string; sessionName: string; signal?: AbortSignal; timeoutMs?: number }): Promise<{ error?: string; url?: string }> {
@@ -540,16 +534,16 @@ async function collectElectronManagedSessionUrl(options: { cwd: string; namespac
 	return urlResult.error ? { error: urlResult.error } : { url };
 }
 
-export async function collectElectronManagedSessionTarget(options: { cwd: string; namespace?: string; sessionName?: string; signal?: AbortSignal; timeoutMs?: number }): Promise<ElectronManagedSessionTarget | undefined> {
+export async function collectElectronManagedSessionTarget(options: { allowManagedSessionTarget?: boolean; cwd: string; namespace?: string; sessionName?: string; signal?: AbortSignal; timeoutMs?: number }): Promise<ElectronManagedSessionTarget | undefined> {
 	if (!options.sessionName) return undefined;
-	const [titleResult, urlResult] = await Promise.all([
-		collectManagedSessionCommandData({ args: ["get", "title"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, timeoutMs: options.timeoutMs }),
-		collectManagedSessionCommandData({ args: ["get", "url"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, timeoutMs: options.timeoutMs }),
-	]);
-	const title = boundElectronProbeString(extractStringResultField(titleResult.data, "result") ?? extractStringResultField(titleResult.data, "title"), 160);
+	const urlResult = await collectManagedSessionCommandData({ allowManagedSessionTarget: options.allowManagedSessionTarget, args: ["get", "url"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, timeoutMs: options.timeoutMs });
 	const url = boundElectronProbeString(extractStringResultField(urlResult.data, "result") ?? extractStringResultField(urlResult.data, "url"), 300);
-	const errors = [titleResult.error, urlResult.error].filter((value): value is string => value !== undefined);
-	return { sessionName: options.sessionName, title, url, ...(errors.length > 0 ? { error: errors.join("; ") } : {}) };
+	if (urlResult.error || !url) return { error: urlResult.error ?? "get url returned no active page URL.", sessionName: options.sessionName };
+	const fileAccessError = getManagedSessionStateAccessValidationError({ args: ["get", "title"], currentPageUrl: url, cwd: options.cwd });
+	if (fileAccessError) return { error: fileAccessError, sessionName: options.sessionName, url };
+	const titleResult = await collectManagedSessionCommandData({ allowManagedSessionTarget: options.allowManagedSessionTarget, args: ["get", "title"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, timeoutMs: options.timeoutMs });
+	const title = boundElectronProbeString(extractStringResultField(titleResult.data, "result") ?? extractStringResultField(titleResult.data, "title"), 160);
+	return { sessionName: options.sessionName, title, url, ...(titleResult.error ? { error: titleResult.error } : {}) };
 }
 
 export async function collectQaAttachedTarget(options: { currentTarget?: SessionTabTarget; cwd: string; namespace?: string; sessionName?: string; signal?: AbortSignal }): Promise<QaAttachedTarget | undefined> {
@@ -682,15 +676,25 @@ export async function collectVisibleRefFallbackDiagnostic(options: { commandToke
 
 export async function collectElectronHandoff(options: { cwd: string; handoff: "connect" | "snapshot" | "tabs"; namespace?: string; sessionName?: string; signal?: AbortSignal }): Promise<ElectronHandoffSummary> {
 	if (options.handoff === "connect") return { handoff: "connect" };
-	const tabs = await runSessionCommandData({ args: ["tab", "list"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal });
+	if (options.signal?.aborted) throw new Error("Electron handoff was aborted.");
+	const urlData = await runSessionCommandData({ args: ["get", "url"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, throwOnFailure: true });
+	if (options.signal?.aborted) throw new Error("Electron handoff was aborted.");
+	const url = extractStringResultField(urlData, "result") ?? extractStringResultField(urlData, "url");
+	if (!url) throw new Error("Electron handoff get url returned no active page URL.");
+	const fileAccessError = getManagedSessionStateAccessValidationError({ args: ["snapshot", "-i"], currentPageUrl: url, cwd: options.cwd });
+	if (fileAccessError) return { error: fileAccessError, failureCategory: "validation-error", handoff: options.handoff };
+	const tabs = await runSessionCommandData({ args: ["tab", "list"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, throwOnFailure: true });
+	if (options.signal?.aborted) throw new Error("Electron handoff was aborted.");
 	if (options.handoff === "tabs") return { handoff: "tabs", tabs };
-	let snapshot = await runSessionCommandData({ args: ["snapshot", "-i"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal });
+	let snapshot = await runSessionCommandData({ args: ["snapshot", "-i"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, throwOnFailure: true });
 	let refSnapshot = extractRefSnapshotFromData(snapshot);
 	let snapshotRetryCount = 0;
 	while ((!refSnapshot || refSnapshot.refIds.length === 0) && snapshotRetryCount < 2) {
+		if (options.signal?.aborted) throw new Error("Electron handoff was aborted.");
 		snapshotRetryCount += 1;
 		await sleepMs(250);
-		snapshot = await runSessionCommandData({ args: ["snapshot", "-i"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal });
+		if (options.signal?.aborted) throw new Error("Electron handoff was aborted.");
+		snapshot = await runSessionCommandData({ args: ["snapshot", "-i"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, throwOnFailure: true });
 		refSnapshot = extractRefSnapshotFromData(snapshot);
 	}
 	return { handoff: "snapshot", refSnapshot, snapshot, ...(snapshotRetryCount > 0 ? { snapshotRetryCount } : {}), tabs };
@@ -865,8 +869,11 @@ function buildTimeoutProgressSteps(options: {
 export async function collectTimeoutPartialProgress(options: { command?: string; compiledJob?: CompiledAgentBrowserJob; cwd: string; namespace?: string; sessionName?: string; stdin?: string }): Promise<TimeoutPartialProgress | undefined> {
 	const rawSteps = getTimeoutProgressSteps(options.compiledJob, options.command, options.stdin);
 	const artifacts = await collectTimeoutArtifactEvidence(options.cwd, rawSteps);
-	const [urlData, titleData] = await Promise.all([runSessionCommandData({ args: ["get", "url"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName }), runSessionCommandData({ args: ["get", "title"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName })]);
+	const urlData = await runSessionCommandData({ args: ["get", "url"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName });
 	const recoveredUrl = extractStringResultField(urlData, "result") ?? extractStringResultField(urlData, "url");
+	const titleData = recoveredUrl && !isFileUrl(recoveredUrl)
+		? await runSessionCommandData({ args: ["get", "title"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName })
+		: undefined;
 	const title = extractStringResultField(titleData, "result") ?? extractStringResultField(titleData, "title");
 	const plannedUrl = recoveredUrl ? undefined : getPlannedCurrentPageUrl(rawSteps);
 	const url = recoveredUrl ?? plannedUrl;

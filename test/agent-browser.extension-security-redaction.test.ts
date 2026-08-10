@@ -7,7 +7,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -191,7 +191,7 @@ process.exit(1);`,
 	}
 });
 
-test("agentBrowserExtension redacts auth password stdin in preserved parse-failure spill files", { concurrency: false }, async () => {
+test("agentBrowserExtension discards auth password parse-failure output", { concurrency: false }, async () => {
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-auth-parse-"));
 	const basePath = process.env.PATH ?? "";
 	await writeFakeAgentBrowserBinary(
@@ -214,10 +214,8 @@ process.stdout.write("invalid-json " + stdin + " " + "x".repeat(600000));`,
 			assert.equal(result.isError, true);
 			assert.equal(JSON.stringify(result.content).includes("super-secret-password"), false);
 			assert.equal(JSON.stringify(result.details).includes("super-secret-password"), false);
-			assert.equal(typeof result.details?.fullOutputPath, "string");
-			const fullOutput = await readFile(String(result.details?.fullOutputPath), "utf8");
-			assert.doesNotMatch(fullOutput, /super-secret-password/);
-			assert.match(fullOutput, /\[REDACTED\]/);
+			assert.equal(result.details?.fullOutputPath, undefined);
+			assert.match(String(result.details?.fullOutputUnavailable ?? ""), /discarded because it may contain sensitive browser data/);
 		});
 	} finally {
 		await rm(tempDir, { force: true, recursive: true });
@@ -253,7 +251,10 @@ process.exit(1);`,
 			assert.equal(result.details?.resultCategory, "failure");
 			assert.equal(result.details?.failureCategory, "confirmation-required");
 			const nextActions = result.details?.nextActions as Array<{ params?: { args: string[] } }> | undefined;
-			assert.deepEqual(nextActions?.map((action) => action.params?.args), [["confirm", "c_sensitive"], ["deny", "c_sensitive"]]);
+			assert.deepEqual(nextActions?.map((action) => action.params?.args), [
+				["--session", result.details?.sessionName, "confirm", "c_sensitive"],
+				["--session", result.details?.sessionName, "deny", "c_sensitive"],
+			]);
 			assert.doesNotMatch(JSON.stringify(result.content), /user:pass|raw-token|token=secret/);
 			assert.doesNotMatch(JSON.stringify(result.details), /user:pass|raw-token|token=secret/);
 		});

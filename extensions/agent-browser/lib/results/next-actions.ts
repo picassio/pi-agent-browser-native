@@ -1,11 +1,3 @@
-/**
- * Purpose: Own machine-readable agent_browser next-action contracts and merge policy.
- * Responsibilities: Define the stable nextAction shape, build basic argv follow-ups, and provide deterministic action-list collection helpers.
- * Scope: Result follow-up action mechanics only; command-specific recovery and artifact policies live in neighboring modules.
- * Usage: Imported by result presentation helpers and the extension entrypoint when attaching details.nextActions.
- * Invariants/Assumptions: Action ids are stable machine-readable contracts; dedupe preserves first occurrence order.
- */
-
 export interface AgentBrowserNextAction {
 	artifactPath?: string;
 	id: string;
@@ -33,22 +25,30 @@ export interface AgentBrowserNextAction {
 }
 
 export function withOptionalNamespaceArgs(namespace: string | undefined, args: string[]): string[] {
-	return namespace && args[0] !== "--namespace" ? ["--namespace", namespace, ...args] : args;
+	return namespace !== undefined && args[0] !== "--namespace" ? ["--namespace", namespace, ...args] : args;
 }
 
 export function withOptionalSessionArgs(sessionName: string | undefined, args: string[]): string[] {
-	if (!sessionName || args[0] === "--session") return args;
-	if (args[0] === "--namespace" && args[1] && args[2] !== "--session") return [args[0], args[1], "--session", sessionName, ...args.slice(2)];
+	if (!sessionName || args[0] === "--session" || (args[0] === "--namespace" && args[2] === "--session")) return args;
+	if (args[0] === "--namespace" && args.length >= 2) return [args[0], args[1], "--session", sessionName, ...args.slice(2)];
 	return ["--session", sessionName, ...args];
 }
 
 export function applyNamespaceToNextActions(actions: AgentBrowserNextAction[] | undefined, namespace: string | undefined): AgentBrowserNextAction[] | undefined {
-	if (!namespace || !actions) return actions;
+	if (namespace === undefined || !actions) return actions;
 	return actions.map((action) => {
 		const args = action.params?.args;
 		if (args) return { ...action, params: { ...action.params, args: withOptionalNamespaceArgs(namespace, args) } };
 		const networkSourceLookup = action.params?.networkSourceLookup;
 		return networkSourceLookup ? { ...action, params: { ...action.params, networkSourceLookup: { ...networkSourceLookup, namespace } } } : action;
+	});
+}
+
+export function applySessionToNextActions(actions: AgentBrowserNextAction[] | undefined, sessionName: string | undefined): AgentBrowserNextAction[] | undefined {
+	if (!sessionName || !actions) return actions;
+	return actions.map((action) => {
+		const args = action.params?.args;
+		return args ? { ...action, params: { ...action.params, args: withOptionalSessionArgs(sessionName, args) } } : action;
 	});
 }
 
@@ -90,7 +90,8 @@ export function appendUniqueAgentBrowserNextActions(
 export function isStandaloneSnapshotNextAction(action: AgentBrowserNextAction): boolean {
 	const args = action.params?.args;
 	if (!args || action.params?.stdin) return false;
-	const commandIndex = args[0] === "--session" ? 2 : 0;
+	let commandIndex = args[0] === "--namespace" ? 2 : 0;
+	if (args[commandIndex] === "--session") commandIndex += 2;
 	return args[commandIndex] === "snapshot";
 }
 
@@ -102,33 +103,4 @@ export function alignPageChangeSummaryNextActionIds<T extends { nextActionIds?: 
 	const nextActionIds = new Set(nextActions.map((action) => action.id));
 	const alignedIds = summary.nextActionIds.filter((id) => nextActionIds.has(id));
 	return alignedIds.length > 0 ? { ...summary, nextActionIds: alignedIds } : { ...summary, nextActionIds: undefined };
-}
-
-export class AgentBrowserNextActionCollector {
-	private actions: AgentBrowserNextAction[];
-
-	constructor(initialActions: AgentBrowserNextAction[] | undefined = undefined) {
-		this.actions = initialActions ? [...initialActions] : [];
-	}
-
-	append(actions: AgentBrowserNextAction[] | undefined): void {
-		if (!actions || actions.length === 0) return;
-		this.actions.push(...actions);
-	}
-
-	appendUnique(actions: AgentBrowserNextAction[] | undefined): void {
-		appendUniqueAgentBrowserNextActions(this.actions, actions);
-	}
-
-	replace(actions: AgentBrowserNextAction[] | undefined): void {
-		this.actions = actions ? [...actions] : [];
-	}
-
-	removeWhere(predicate: (action: AgentBrowserNextAction) => boolean): void {
-		this.actions = this.actions.filter((action) => !predicate(action));
-	}
-
-	toArray(): AgentBrowserNextAction[] | undefined {
-		return this.actions.length > 0 ? [...this.actions] : undefined;
-	}
 }

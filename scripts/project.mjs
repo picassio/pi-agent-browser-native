@@ -9,7 +9,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
@@ -73,7 +73,6 @@ Modes:
   typecheck           Run TypeScript typecheck only.
   command-reference   Check generated command-reference block and live upstream help drift.
   pre-pr              Run default verification plus package-content checks for larger local handoffs.
-  benchmark           Run the deterministic agent-browser efficiency benchmark and focused tests.
   startup-profile     Run the safe package entrypoint startup profiler.
   real-upstream       Run the opt-in real upstream browser contract suite (localhost fixtures, broad core commands).
   dogfood             Run a deterministic model-free live-browser smoke through the native tool wrapper.
@@ -115,7 +114,7 @@ Examples:
 
 Publisher note:
   package.json prepublishOnly runs release (default + lifecycle + package-pi + platform smoke), then npm pack --dry-run during npm publish.
-  It does not run real-upstream, dogfood, or benchmark; see docs/RELEASE.md#pre-release-checks.
+  It does not run real-upstream or dogfood; see docs/RELEASE.md#pre-release-checks.
 
 Exit codes:
   0  Verification passed or help was shown.
@@ -165,6 +164,13 @@ function scriptStep(args, env) {
 	return { command: nodeCommand, args, env };
 }
 
+export function hostToolPath(pathValue = process.env.PATH ?? "") {
+	return pathValue
+		.split(delimiter)
+		.filter((directory) => directory && !/(^|[\\/])node_modules[\\/]\.bin$/i.test(directory))
+		.join(delimiter);
+}
+
 function localToolStep(command, args, env) {
 	return { command: join(process.cwd(), "node_modules", ".bin", `${command}${binSuffix}`), args, env };
 }
@@ -210,7 +216,6 @@ export function parseVerifyArgs(argv) {
 		"typecheck",
 		"command-reference",
 		"pre-pr",
-		"benchmark",
 		"startup-profile",
 		"real-upstream",
 		"dogfood",
@@ -257,7 +262,6 @@ function validatePassthrough(mode, passthrough) {
 		typecheck: new Set(),
 		"command-reference": new Set(),
 		"pre-pr": new Set(),
-		benchmark: new Set(),
 		"startup-profile": new Set(["--samples", "--json"]),
 		"real-upstream": new Set(),
 		dogfood: new Set(["--artifact-dir", "--keep-artifacts", "--json"]),
@@ -328,23 +332,21 @@ export function verifySteps(options) {
 				...verifySteps({ mode: "default", passthrough: [], showHelp: false }),
 				...verifySteps({ mode: "package", passthrough: [], showHelp: false }),
 			];
-		case "benchmark":
-			return [
-				scriptStep(["./scripts/agent-browser-efficiency-benchmark.mjs", "--json"]),
-				localToolStep("tsx", ["--test", "test/agent-browser.efficiency-benchmark.test.ts"]),
-			];
 		case "startup-profile":
 			return [scriptStep(["./scripts/profile-startup.mjs", ...options.passthrough])];
 		case "real-upstream":
-			return [localToolStep("tsx", ["--test", "test/agent-browser.real-upstream-contract.test.ts"], { PI_AGENT_BROWSER_REAL_UPSTREAM: "1" })];
+			return [
+				localToolStep("tsx", ["--test", "--test-force-exit", "--test-name-pattern", "plugin list stays sessionless", "test/agent-browser.real-upstream-contract.test.ts"], { PI_AGENT_BROWSER_REAL_UPSTREAM: "1" }),
+				localToolStep("tsx", ["--test", "--test-force-exit", "--test-name-pattern", "contract suite matches", "test/agent-browser.real-upstream-contract.test.ts"], { PI_AGENT_BROWSER_REAL_UPSTREAM: "1" }),
+			];
 		case "dogfood":
-			return [localToolStep("tsx", ["./scripts/verify-agent-browser-dogfood.ts", ...options.passthrough])];
+			return [buildStep(), localToolStep("tsx", ["./scripts/verify-agent-browser-dogfood.ts", ...options.passthrough])];
 		case "package":
 			return [scriptStep(["./scripts/verify-package.mjs", ...options.passthrough])];
 		case "package-pi":
 			return [scriptStep(["./scripts/verify-package.mjs", "--smoke-pi", ...options.passthrough])];
 		case "lifecycle":
-			return [scriptStep(["./scripts/verify-lifecycle.mjs", ...options.passthrough])];
+			return [scriptStep(["./scripts/verify-lifecycle.mjs", ...options.passthrough], { PATH: hostToolPath() })];
 		case "platform-target":
 			return [
 				...docsSteps({ mode: "check", target: "all" }),

@@ -1,9 +1,3 @@
-/**
- * Purpose: Compile and analyze experimental DOM/source and network source lookup input modes.
- * Responsibilities: Build lookup batches, collect DOM/React/workspace candidates, and redact network lookup surfaces.
- * Scope: Source lookup and network source lookup only.
- */
-
 import { readFile, readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 
@@ -285,7 +279,7 @@ export function compileAgentBrowserNetworkSourceLookup(input: unknown): { compil
 	const url = input.url;
 	if (filter !== undefined && (typeof filter !== "string" || filter.trim().length === 0)) return { error: "networkSourceLookup.filter must be a non-empty string when provided." };
 	if (requestId !== undefined && (typeof requestId !== "string" || requestId.trim().length === 0)) return { error: "networkSourceLookup.requestId must be a non-empty string when provided." };
-	if (namespace !== undefined && (typeof namespace !== "string" || namespace.trim().length === 0)) return { error: "networkSourceLookup.namespace must be a non-empty string when provided." };
+	if (namespace !== undefined && (typeof namespace !== "string" || (namespace !== "" && namespace.trim().length === 0))) return { error: "networkSourceLookup.namespace must be a non-empty string or the empty default namespace when provided." };
 	if (session !== undefined && (typeof session !== "string" || session.trim().length === 0)) return { error: "networkSourceLookup.session must be a non-empty string when provided." };
 	if (url !== undefined && (typeof url !== "string" || url.trim().length === 0)) return { error: "networkSourceLookup.url must be a non-empty string when provided." };
 	if (filter === undefined && requestId === undefined && url === undefined) return { error: "networkSourceLookup requires requestId, filter, or url." };

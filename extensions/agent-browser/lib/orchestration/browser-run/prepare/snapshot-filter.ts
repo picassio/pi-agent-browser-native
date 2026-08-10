@@ -1,5 +1,5 @@
 import { isRecord } from "../../../parsing.js";
-import { buildAgentBrowserResultCategoryDetails } from "../../../results.js";
+import { buildAgentBrowserResultCategoryDetails } from "../../../results/categories.js";
 import { buildSnapshotPresentation } from "../../../results/snapshot.js";
 import { extractRefSnapshotFromData, type SessionRefSnapshot } from "../../../session-page-state.js";
 import type { CompatibilityWorkaround } from "../../../runtime.js";
@@ -125,6 +125,7 @@ export async function trySnapshotFilter(options: {
 	compatibilityWorkaround?: CompatibilityWorkaround;
 	cwd: string;
 	effectiveArgs: string[];
+	managedSessionRestoreDisabled: () => boolean;
 	persistentArtifactStore?: PersistentSessionArtifactStore;
 	redactedArgs: string[];
 	previousRefSnapshot?: SessionRefSnapshot;
@@ -176,7 +177,7 @@ export async function trySnapshotFilter(options: {
 				snapshotFilter: request.role || request.search ? { cleanArgs: request.cleanArgs, matchedRefs: filtered.matchedRefs, role: request.role, search: request.search, totalLines: filtered.totalLines, totalRefs: filtered.totalRefs, visibleLines: filtered.visibleLines } : undefined,
 				snapshotViewport: viewport,
 				...buildAgentBrowserResultCategoryDetails({ args: options.effectiveArgs, command: "snapshot", succeeded: true }),
-				...buildSessionDetailFields(options.sessionName, options.usedImplicitSession, options.namespace),
+				...buildSessionDetailFields(options.sessionName, options.usedImplicitSession, options.namespace, options.managedSessionRestoreDisabled()),
 				summary,
 			},
 			isError: false,

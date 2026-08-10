@@ -10,8 +10,8 @@ import assert from "node:assert/strict";
 import { readFile, rm } from "node:fs/promises";
 import test from "node:test";
 
-import { buildToolPresentation } from "../extensions/agent-browser/lib/results.js";
-
+import { getArtifactCleanupGuidance } from "../extensions/agent-browser/lib/orchestration/browser-run/diagnostics.js";
+import { buildToolPresentation } from "../extensions/agent-browser/lib/results/presentation.js";
 test("buildToolPresentation redacts scalar extraction results for eval and get commands", async () => {
 	const evalPresentation = await buildToolPresentation({
 		commandInfo: { command: "eval", subcommand: "--stdin" },
@@ -73,14 +73,57 @@ test("buildToolPresentation formats scalar extraction results for eval and get c
 		envelope: {
 			success: true,
 			data: {
+				lifecycle: { reused: true },
 				origin: "https://example.com/",
-				result: "Example Domain",
+				title: "Example Domain",
 			},
 		},
 	});
 	assert.equal(getPresentation.content[0]?.type, "text");
 	assert.equal((getPresentation.content[0] as { text: string }).text, "Example Domain\n\nOrigin: https://example.com/");
 	assert.equal(getPresentation.summary, "Title: Example Domain");
+
+	const getTextPresentation = await buildToolPresentation({
+		commandInfo: { command: "get", subcommand: "text" },
+		cwd: process.cwd(),
+		envelope: { success: true, data: { lifecycle: { reused: true }, origin: "https://example.com/", text: "Visible body text" } },
+	});
+	assert.equal((getTextPresentation.content[0] as { text: string }).text, "Visible body text\n\nOrigin: https://example.com/");
+	assert.doesNotMatch((getTextPresentation.content[0] as { text: string }).text, /lifecycle|reused/);
+});
+
+test("buildToolPresentation compacts common action, wait, close, tab-close, and diagnostic reset results", async () => {
+	const cases: Array<{ commandInfo: { command: string; commandTokens?: string[]; subcommand?: string }; data: Record<string, unknown>; expected: string }> = [
+		{ commandInfo: { command: "fill" }, data: { filled: "#email", lifecycle: { reused: true } }, expected: "Filled: #email" },
+		{ commandInfo: { command: "wait" }, data: { selector: "#ready", waited: "selector", lifecycle: { reused: true } }, expected: "Wait completed: #ready" },
+		{ commandInfo: { command: "wait" }, data: { waited: "timeout", lifecycle: { reused: true } }, expected: "Fixed wait elapsed; no page condition was verified." },
+		{ commandInfo: { command: "close" }, data: { closed: true, lifecycle: { reused: false }, statePath: "/private/state" }, expected: "Browser session closed." },
+		{ commandInfo: { command: "tab", subcommand: "close" }, data: { closed: true, tabId: "t1", lifecycle: { reused: true } }, expected: "Tab closed: t1" },
+		{ commandInfo: { command: "network", commandTokens: ["network", "requests", "--clear"], subcommand: "requests" }, data: { cleared: true, lifecycle: { reused: true } }, expected: "Network request buffer cleared." },
+		{ commandInfo: { command: "console", commandTokens: ["console", "--clear"], subcommand: "--clear" }, data: { cleared: true, lifecycle: { reused: true } }, expected: "Console buffer cleared." },
+	];
+	for (const { commandInfo, data, expected } of cases) {
+		const presentation = await buildToolPresentation({ commandInfo, cwd: process.cwd(), envelope: { success: true, data } });
+		assert.equal((presentation.content[0] as { text: string }).text, expected);
+		assert.doesNotMatch((presentation.content[0] as { text: string }).text, /lifecycle|statePath|reused/);
+	}
+});
+
+test("artifact cleanup guidance ignores wrapper-managed spills", async () => {
+	const guidance = await getArtifactCleanupGuidance({
+		command: "close",
+		cwd: process.cwd(),
+		manifest: {
+			entries: [{ createdAtMs: 1, kind: "spill", path: "/tmp/internal-spill.json", retentionState: "live", storageScope: "persistent-session" }],
+			evictedCount: 0,
+			liveCount: 1,
+			maxEntries: 10,
+			updatedAtMs: 1,
+			version: 1,
+		},
+		succeeded: true,
+	});
+	assert.equal(guidance, undefined);
 });
 
 test("buildToolPresentation formats session status and session list", async () => {
@@ -98,12 +141,17 @@ test("buildToolPresentation formats session status and session list", async () =
 		envelope: {
 			success: true,
 			data: {
-				sessions: [{ active: true, name: "work", title: "Example", url: "https://example.com" }],
+				sessions: [
+					{ active: true, name: "piab-foreign", title: "Private", url: "https://private.example" },
+					{ active: true, name: "PIAB-case-alias", title: "Private Alias", url: "https://alias.private.example" },
+					{ active: true, name: "work", title: "Example", url: "https://example.com" },
+				],
 			},
 		},
 	});
 	assert.equal(list.summary, "Sessions: 1");
 	assert.equal((list.content[0] as { text: string }).text, "1. name=work *active*; active=true; title=Example; url=https://example.com");
+	assert.doesNotMatch(JSON.stringify(list.data), /piab-foreign|PIAB-case-alias|private\.example/);
 });
 
 test("buildToolPresentation formats Chrome profile arrays", async () => {
@@ -198,6 +246,22 @@ test("buildToolPresentation formats stateful browser-context results without lea
 			matches: [/prod-state\.json/, /REDACTED/],
 			missing: /state-secret/,
 		},
+		{
+			commandInfo: { command: "state", subcommand: "show" },
+			data: {
+				encrypted: false,
+				filename: "prod-state.json",
+				size: 512,
+				state: {
+					cookies: [{ domain: "example.test", name: "sid", value: "v1x9p3" }],
+					origins: [{ localStorage: [{ name: "theme", value: "l7q2z8" }], origin: "https://example.test" }],
+				},
+				summary: "1 cookies, 1 origins",
+			},
+			summary: "State show: prod-state.json",
+			matches: [/Saved state: prod-state\.json/, /Summary: 1 cookies, 1 origins/, /Encrypted: no/, /Size: 512 bytes/],
+			missing: /v1x9p3|l7q2z8/,
+		},
 	] as const;
 
 	for (const testCase of cases) {
@@ -214,6 +278,39 @@ test("buildToolPresentation formats stateful browser-context results without lea
 			assert.doesNotMatch(JSON.stringify(presentation.data), testCase.missing);
 		}
 	}
+});
+
+test("buildToolPresentation hides managed restore capabilities and state-list rows", async () => {
+	const restoreKey = `piab-r2-${"a".repeat(32)}`;
+	const list = await buildToolPresentation({
+		commandInfo: { command: "state", subcommand: "list" },
+		cwd: process.cwd(),
+		envelope: {
+			success: true,
+			data: {
+				files: [
+					{ filename: `${restoreKey}-managed.json`, path: `/tmp/${restoreKey}-managed.json`, url: "https://private.example" },
+					{ filename: "caller-owned.json", path: "/tmp/caller-owned.json" },
+				],
+			},
+		},
+	});
+	const listSerialized = JSON.stringify(list);
+	assert.equal(list.summary, "States: 1");
+	assert.match((list.content[0] as { text: string }).text, /caller-owned\.json/);
+	assert.doesNotMatch(listSerialized, /piab-r2-|private\.example|managed\.json/);
+
+	const sessionInfo = await buildToolPresentation({
+		commandInfo: { command: "session", subcommand: "info" },
+		cwd: process.cwd(),
+		envelope: {
+			success: true,
+			data: { active: true, runtime: { restoreKey }, legacyStatePath: `/tmp/piab-r-${"b".repeat(32)}-managed.json`, statePath: `/tmp/${restoreKey}-managed.json` },
+		},
+	});
+	const infoSerialized = JSON.stringify(sessionInfo);
+	assert.doesNotMatch(infoSerialized, /piab-r(?:2)?-[a-f\d]{32}/);
+	assert.match(infoSerialized, /REDACTED MANAGED STATE/);
 });
 
 test("buildToolPresentation keeps benign storage values visible while redacting likely secrets", async () => {

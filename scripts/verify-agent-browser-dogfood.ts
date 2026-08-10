@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
  * Purpose: Run a deterministic, model-free live-browser smoke through the native agent_browser extension surface.
- * Responsibilities: Exercise top-level qa, semanticAction, job, artifact verification, and close without relying on an LLM to choose tool calls.
- * Scope: Maintainer verification only; it uses a local file fixture and the local extension harness, and it is not part of the published runtime package.
+ * Responsibilities: Exercise top-level script, qa, semanticAction, job, artifact verification, and close without relying on an LLM to choose tool calls.
+ * Scope: Maintainer verification only; it uses a loopback HTTP fixture and the local extension harness, and it is not part of the published runtime package.
  * Usage: `npm run verify -- dogfood` or `npx tsx scripts/verify-agent-browser-dogfood.ts [--keep-artifacts] [--artifact-dir <path>] [--json]`.
- * Invariants/Assumptions: `agent-browser` is installed on PATH; the script serves a local file fixture so platform checks do not depend on public network reachability.
+ * Invariants/Assumptions: `agent-browser` is installed on PATH; the script serves a loopback fixture so platform checks do not depend on public network reachability.
  */
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
@@ -109,29 +110,38 @@ function getArtifactVerification(result: Awaited<ReturnType<typeof executeRegist
 	return typeof value === "object" && value !== null ? value as { verified?: boolean } : undefined;
 }
 
-async function writeDogfoodFixture(rootDir: string): Promise<{ helpUrl: string; origin: string }> {
-	const fixtureDir = join(rootDir, "fixture");
-	await mkdir(fixtureDir, { recursive: true });
-	const helpPath = join(fixtureDir, "example-domains.html");
-	const indexPath = join(fixtureDir, "index.html");
-	await writeFile(helpPath, `<!doctype html>
-<html lang="en">
-<head><title>Example Domain Help</title></head>
-<body><h1>Example Domain Help</h1><p>Learn more target reached.</p></body>
-</html>`);
-	const helpUrl = pathToFileURL(helpPath).href;
-	await writeFile(indexPath, `<!doctype html>
-<html lang="en">
-<head><title>Example Domain</title></head>
-<body>
-<main>
-<h1>Example Domain</h1>
-<p>This local fixture is reserved for deterministic platform smoke tests.</p>
-<a href="${helpUrl}">Learn more</a>
-</main>
-</body>
-</html>`);
-	return { helpUrl, origin: pathToFileURL(indexPath).href };
+async function startDogfoodFixture(): Promise<{ close: () => Promise<void>; helpUrl: string; origin: string }> {
+	const server = createServer((request, response) => {
+		response.setHeader("content-type", "text/html; charset=utf-8");
+		if (request.url === "/script-a") {
+			response.end("<!doctype html><html lang=\"en\"><head><title>Script A</title></head><body><div role=\"dialog\"><button id=\"dismiss\" onclick=\"this.parentElement.remove()\">Dismiss</button></div><ul><li data-value=\"a1\">A1</li><li data-value=\"a2\">A2</li></ul></body></html>");
+			return;
+		}
+		if (request.url === "/script-b") {
+			response.end("<!doctype html><html lang=\"en\"><head><title>Script B</title></head><body><ul><li data-value=\"b1\">B1</li><li data-value=\"b2\">B2</li></ul></body></html>");
+			return;
+		}
+		if (request.url === "/example-domains.html") {
+			response.end("<!doctype html><html lang=\"en\"><head><title>Example Domain Help</title></head><body><h1>Example Domain Help</h1><p>Learn more target reached.</p></body></html>");
+			return;
+		}
+		response.end("<!doctype html><html lang=\"en\"><head><title>Example Domain</title></head><body><main><h1>Example Domain</h1><p>This loopback fixture is reserved for deterministic platform smoke tests.</p><a href=\"/example-domains.html\">Learn more</a></main></body></html>");
+	});
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("Loopback dogfood server did not expose a TCP port.");
+	const origin = `http://127.0.0.1:${address.port}/`;
+	return {
+		close: async () => await new Promise<void>((resolve, reject) => {
+			server.close((error) => error ? reject(error) : resolve());
+			server.closeAllConnections();
+		}),
+		helpUrl: `${origin}example-domains.html`,
+		origin,
+	};
 }
 
 type AgentBrowserToolExecutionResult = Awaited<ReturnType<typeof executeRegisteredTool>>;
@@ -173,8 +183,8 @@ export async function runAgentBrowserDogfood(options: DogfoodOptions = {}): Prom
 	const shouldRemoveArtifacts = !options.keepArtifacts && !options.artifactDir;
 	await mkdir(artifactDir, { recursive: true });
 	const jobScreenshotPath = join(artifactDir, "job.png");
-	const harness = createExtensionHarness({ cwd, sessionId: randomUUID() });
-	const fixture = await writeDogfoodFixture(artifactDir);
+	const harness = createExtensionHarness({ cwd, sessionFile: join(artifactDir, "dogfood-session.jsonl"), sessionId: randomUUID() });
+	const fixture = await startDogfoodFixture();
 	const reports: DogfoodStepReport[] = [];
 	let closed = false;
 
@@ -194,6 +204,25 @@ export async function runAgentBrowserDogfood(options: DogfoodOptions = {}): Prom
 				},
 			}),
 		}));
+
+		const scriptResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+			script: `const values = [];
+for (const url of ${JSON.stringify([`${fixture.origin}script-a`, `${fixture.origin}script-b`])}) {
+  const opened = await browser({ args: ["open", url] });
+  if (!opened.ok) throw new Error(opened.error);
+  const probe = await browser({ args: ["eval", "--stdin"], stdin: "({ hasBanner: Boolean(document.querySelector('[role=dialog]')), values: [...document.querySelectorAll('[data-value]')].map(node => node.getAttribute('data-value')) })" });
+  if (!probe.ok) throw new Error(probe.error);
+  if (probe.data.result.hasBanner) {
+    const dismissed = await browser({ args: ["click", "#dismiss"] });
+    if (!dismissed.ok) throw new Error(dismissed.error);
+  }
+  values.push(...probe.data.result.values);
+}
+emit(values);`,
+		});
+		assert.deepEqual(scriptResult.details?.data, ["a1", "a2", "b1", "b2"]);
+		assert.equal((scriptResult.details?.scriptSession as { cleanup?: string } | undefined)?.cleanup, "closed");
+		reports.push(await assertSuccessfulStep({ id: "script-branch-and-aggregate", result: scriptResult, textPattern: /a1/ }));
 
 		reports.push(await assertSuccessfulStep({
 			id: "open-fresh-example",
@@ -250,6 +279,7 @@ export async function runAgentBrowserDogfood(options: DogfoodOptions = {}): Prom
 			await executeRegisteredTool(harness.tool, harness.ctx, { args: ["close"] }).catch(() => undefined);
 		}
 		await runExtensionEvent(harness.handlers, "session_shutdown", { reason: "quit" }, harness.ctx).catch(() => undefined);
+		await fixture.close();
 		if (shouldRemoveArtifacts) {
 			await rm(artifactDir, { force: true, recursive: true });
 		}

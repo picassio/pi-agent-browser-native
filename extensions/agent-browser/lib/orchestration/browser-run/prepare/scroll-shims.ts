@@ -1,5 +1,5 @@
 import { isRecord } from "../../../parsing.js";
-import { buildAgentBrowserResultCategoryDetails } from "../../../results.js";
+import { buildAgentBrowserResultCategoryDetails } from "../../../results/categories.js";
 import { applyNamespaceToNextActions } from "../../../results/next-actions.js";
 import type { CompatibilityWorkaround } from "../../../runtime.js";
 import { buildScrollNoopNextActions } from "../diagnostics.js";
@@ -51,6 +51,7 @@ function buildScrollResult(options: {
 	command: "scroll";
 	compatibilityWorkaround?: CompatibilityWorkaround;
 	effectiveArgs: string[];
+	managedSessionRestoreDisabled: () => boolean;
 	message: string;
 	redactedArgs: string[];
 	result: Record<string, unknown>;
@@ -75,7 +76,7 @@ function buildScrollResult(options: {
 			[options.scrollField]: options.scrollValue,
 			sessionMode: options.sessionMode,
 			...buildAgentBrowserResultCategoryDetails({ args: options.effectiveArgs, command: options.command, errorText: options.succeeded ? undefined : options.message, succeeded: options.succeeded, validationError: options.succeeded ? undefined : options.message }),
-			...buildSessionDetailFields(options.sessionName, options.usedImplicitSession, options.namespace),
+			...buildSessionDetailFields(options.sessionName, options.usedImplicitSession, options.namespace, options.managedSessionRestoreDisabled()),
 			summary: options.message,
 			validationError: options.succeeded ? undefined : options.message,
 		},
@@ -88,6 +89,7 @@ export async function tryContainerScroll(options: {
 	compatibilityWorkaround?: CompatibilityWorkaround;
 	cwd: string;
 	effectiveArgs: string[];
+	managedSessionRestoreDisabled: () => boolean;
 	redactedArgs: string[];
 	sessionMode: "auto" | "fresh";
 	namespace?: string;
@@ -164,6 +166,7 @@ export async function tryPageScrollTo(options: {
 	compatibilityWorkaround?: CompatibilityWorkaround;
 	cwd: string;
 	effectiveArgs: string[];
+	managedSessionRestoreDisabled: () => boolean;
 	redactedArgs: string[];
 	sessionMode: "auto" | "fresh";
 	namespace?: string;

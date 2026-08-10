@@ -2,7 +2,7 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { isRecord } from "../../../parsing.js";
-import { buildAgentBrowserResultCategoryDetails } from "../../../results.js";
+import { buildAgentBrowserResultCategoryDetails } from "../../../results/categories.js";
 import { formatSessionArtifactRetentionSummary, mergeSessionArtifactManifest } from "../../../results/artifact-manifest.js";
 import type { SessionArtifactManifest, SessionArtifactManifestEntry } from "../../../results/contracts.js";
 import { redactSensitiveText, type CompatibilityWorkaround } from "../../../runtime.js";
@@ -39,6 +39,7 @@ export async function tryDirectAnchorDownload(options: {
 	compatibilityWorkaround?: CompatibilityWorkaround;
 	cwd: string;
 	effectiveArgs: string[];
+	managedSessionRestoreDisabled: () => boolean;
 	redactedArgs: string[];
 	sessionMode: "auto" | "fresh";
 	namespace?: string;
@@ -148,7 +149,7 @@ export async function tryDirectAnchorDownload(options: {
 					savedFilePath: absolutePath,
 					sessionMode: options.sessionMode,
 					...buildAgentBrowserResultCategoryDetails({ artifacts: [artifact], args: options.effectiveArgs, command: "download", savedFile, succeeded: true }),
-					...buildSessionDetailFields(options.sessionName, options.usedImplicitSession, options.namespace),
+					...buildSessionDetailFields(options.sessionName, options.usedImplicitSession, options.namespace, options.managedSessionRestoreDisabled()),
 					summary: `Download completed: ${absolutePath}`,
 				},
 				isError: false,

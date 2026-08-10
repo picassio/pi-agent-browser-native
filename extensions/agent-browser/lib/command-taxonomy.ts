@@ -1,10 +1,3 @@
-/**
- * Purpose: Centralize upstream agent-browser command capabilities that wrapper behavior depends on.
- * Responsibilities: Normalize command aliases once and expose capability predicates for runtime planning,
- * session/ref guards, result recommendations, and presentation summaries without coupling unrelated behaviors.
- * Scope: Static command capability taxonomy only; command-shape parsing, spawning, and formatting live elsewhere.
- */
-
 type CommandCapabilityFlag =
 	| "closesSession"
 	| "openNavigation"
@@ -100,6 +93,12 @@ const COMMAND_CAPABILITIES: readonly CommandCapabilityEntry[] = [
 	{
 		command: "errors",
 		readOnlyDiagnosticSessionTarget: true,
+	},
+	{
+		command: "eval",
+		invalidatesBatchRefs: true,
+		navigationObservable: true,
+		triggersPostMutationSnapshot: true,
 	},
 	{
 		command: "fill",
@@ -339,6 +338,12 @@ export function isElectronPostCommandHealthCommand(command: string | undefined):
 
 export function isNavigationObservableCommandName(command: string | undefined): boolean {
 	return hasCommandCapability(command, "navigationObservable");
+}
+
+export function isUnverifiedPageTransitionCommand(command: string | undefined, subcommand?: string): boolean {
+	return ["back", "connect", "eval", "forward", "reload"].includes(command ?? "")
+		|| (command === "state" && subcommand === "load")
+		|| (command === "tab" && subcommand !== undefined && !["list", "new"].includes(subcommand));
 }
 
 export function isPageMutationCommand(command: string | undefined): boolean {

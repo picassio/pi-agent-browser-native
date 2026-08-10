@@ -7,13 +7,14 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
 	createExtensionHarness,
+	createToolBranchEntry,
 	executeRegisteredTool,
 	readInvocationLog,
 	runExtensionEvent,
@@ -23,7 +24,9 @@ import {
 
 const stripWrapperPrefix = (args: string[]) => {
 	const stripped = [...args];
+	if (stripped[0] === "--allow-file-access") stripped.splice(0, 2);
 	if (stripped[0] === "--json") stripped.shift();
+	if (stripped[0] === "--namespace") stripped.splice(0, 2);
 	if (stripped[0] === "--session") stripped.splice(0, 2);
 	return stripped;
 };
@@ -307,12 +310,12 @@ if (skillIndex >= 0 && args[skillIndex + 1] === "get") {
 
 				for (const args of providerCommands) {
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...args], sessionMode: "fresh" });
-					assert.equal(result.isError, false, args.join(" "));
+					assert.equal(result.isError, false, `${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`);
 					assert.doesNotMatch(JSON.stringify(result.details), /agentcore-key|browserbase-key|browserless-key|browser-use-key|kernel-key/);
 				}
 				for (const args of skillCommands) {
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...args] });
-					assert.equal(result.isError, false, args.join(" "));
+					assert.equal(result.isError, false, `${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`);
 					assert.equal(result.details?.sessionName, undefined, args.join(" "));
 					assert.equal(result.details?.usedImplicitSession, undefined, args.join(" "));
 				}
@@ -340,6 +343,185 @@ if (skillIndex >= 0 && args[skillIndex + 1] === "get") {
 	}
 });
 
+test("agentBrowserExtension preserves one attached Chrome connection across explicit-session follow-ups", { concurrency: false }, async () => {
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-attached-session-"));
+	const logPath = join(tempDir, "invocations.log");
+	const failedDaemonPath = join(tempDir, "failed-daemon-active");
+	const unsafeTargetPath = join(tempDir, "unsafe-target");
+	const basePath = process.env.PATH ?? "";
+	await writeFakeAgentBrowserBinary(
+		tempDir,
+		`const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
+const valueFlags = new Set(["--allow-file-access", "--args", "--cdp", "--namespace", "--session"]);
+let commandIndex = -1;
+for (let index = 0; index < args.length; index += 1) {
+  if (args[index] === "--json") continue;
+  if (valueFlags.has(args[index])) { index += 1; continue; }
+  if (args[index].startsWith("--")) continue;
+  commandIndex = index;
+  break;
+}
+const command = args[commandIndex] || "unknown";
+const subcommand = args[commandIndex + 1];
+const sessionName = args.includes("--session") ? args[args.indexOf("--session") + 1] : undefined;
+if (process.env.PI_AGENT_BROWSER_TEST_FAIL_ATTACHED_GET_URL === "1" && command === "get" && subcommand === "url" && args.includes("--cdp")) {
+  fs.writeFileSync(${JSON.stringify(failedDaemonPath)}, "active");
+  process.stdout.write(JSON.stringify({ success: false, error: "attached get url failed after launch" }));
+  process.exit(1);
+}
+const currentUrl = fs.existsSync(${JSON.stringify(unsafeTargetPath)}) ? "file:///tmp/private.html" : "https://dash.cloudflare.com/";
+const sessionActive = sessionName === "cloudflare-live" || fs.existsSync(${JSON.stringify(failedDaemonPath)});
+const data = command === "session" && subcommand === "info"
+  ? { active: sessionActive, runtime: sessionActive ? { restoreKey: null } : null }
+  : command === "get" && subcommand === "url"
+  ? { result: currentUrl, url: currentUrl }
+  : command === "snapshot"
+    ? { snapshot: "- heading \\"Cloudflare Dashboard\\" [ref=e1]" }
+    : { connected: command === "connect" };
+process.stdout.write(JSON.stringify({ success: true, data }));`,
+	);
+
+	try {
+		await withPatchedEnv({
+			PATH: `${tempDir}:${basePath}`,
+			PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1",
+			PI_AGENT_BROWSER_TEST_PRESERVE_INTERNAL_LAUNCH_FLAGS: "1",
+		}, async () => {
+			const harness = createExtensionHarness({ cwd: tempDir, prompt: "Inspect the attached Cloudflare tab." });
+			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+
+			const connect = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["--session", "cloudflare-live", "connect", "9222"] });
+			const url = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["--session", "cloudflare-live", "get", "url"] });
+			const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["--session", "cloudflare-live", "snapshot", "-i"] });
+			const freshLabeledUrl = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["--session", "cloudflare-live", "get", "url"], sessionMode: "fresh" });
+
+			assert.equal(connect.isError, false, connect.content[0]?.type === "text" ? connect.content[0].text : "connect failed");
+			assert.equal(url.isError, false, url.content[0]?.type === "text" ? url.content[0].text : "get url failed");
+			assert.equal(snapshot.isError, false, snapshot.content[0]?.type === "text" ? snapshot.content[0].text : "snapshot failed");
+			assert.equal(freshLabeledUrl.isError, false, freshLabeledUrl.content[0]?.type === "text" ? freshLabeledUrl.content[0].text : "fresh-labeled get url failed");
+			const attachedInvocations = (await readInvocationLog(logPath)).filter((entry) => entry.args.includes("cloudflare-live"));
+			assert.ok(attachedInvocations.some((entry) => entry.args.includes("connect")));
+			assert.ok(attachedInvocations.some((entry) => entry.args.includes("snapshot")));
+			assert.ok(attachedInvocations.some((entry) => entry.args.includes("get") && entry.args.includes("url")));
+			assert.ok(attachedInvocations.every((entry) => !entry.args.includes("--args") && !entry.args.includes("--allow-file-access")));
+
+			const invocationCount = (await readInvocationLog(logPath)).length;
+			const resumedHarness = createExtensionHarness({
+				branch: [
+					createToolBranchEntry({ details: connect.details ?? {}, isError: connect.isError }),
+					createToolBranchEntry({ details: url.details ?? {}, isError: url.isError }),
+					createToolBranchEntry({ details: snapshot.details ?? {}, isError: snapshot.isError }),
+				],
+				cwd: tempDir,
+				prompt: "Resume the attached Cloudflare tab.",
+			});
+			await runExtensionEvent(resumedHarness.handlers, "session_start", { reason: "resume" }, resumedHarness.ctx);
+			const resumedSnapshot = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, { args: ["--session", "cloudflare-live", "snapshot", "-i"] });
+			assert.equal(resumedSnapshot.isError, false, resumedSnapshot.content[0]?.type === "text" ? resumedSnapshot.content[0].text : "resumed snapshot failed");
+			const resumedInvocations = (await readInvocationLog(logPath)).slice(invocationCount);
+			assert.ok(resumedInvocations.length > 0);
+			assert.ok(resumedInvocations.every((entry) => !entry.args.includes("--args") && !entry.args.includes("--allow-file-access")));
+
+			await writeFile(unsafeTargetPath, "unsafe", "utf8");
+			const driftInvocationCount = (await readInvocationLog(logPath)).length;
+			const blockedDriftSnapshot = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, { args: ["--session", "cloudflare-live", "snapshot", "-i"] });
+			assert.equal(blockedDriftSnapshot.isError, true);
+			assert.match((blockedDriftSnapshot.content[0]?.type === "text" ? blockedDriftSnapshot.content[0].text : "") ?? "", /local|file/i);
+			const driftInvocations = (await readInvocationLog(logPath)).slice(driftInvocationCount);
+			assert.ok(driftInvocations.some((entry) => entry.args.includes("get") && entry.args.includes("url")));
+			assert.ok(driftInvocations.every((entry) => !entry.args.includes("snapshot")));
+
+			const implicitHarness = createExtensionHarness({ cwd: tempDir, prompt: "Reject content capture before the attached page URL is verified." });
+			await runExtensionEvent(implicitHarness.handlers, "session_start", { reason: "new" }, implicitHarness.ctx);
+			const implicitInvocationCount = (await readInvocationLog(logPath)).length;
+			const blockedFirstUse = await executeRegisteredTool(implicitHarness.tool, implicitHarness.ctx, { args: ["--cdp", "9222", "snapshot", "-i"], sessionMode: "fresh" });
+			assert.equal(blockedFirstUse.isError, true);
+			assert.match((blockedFirstUse.content[0]?.type === "text" ? blockedFirstUse.content[0].text : "") ?? "", /unverified/i);
+			assert.ok((await readInvocationLog(logPath)).slice(implicitInvocationCount).every((entry) => !entry.args.includes("snapshot")));
+
+			await rm(unsafeTargetPath, { force: true });
+			const managedHarness = createExtensionHarness({ cwd: tempDir, prompt: "Attach a managed session, verify it, then close it safely." });
+			await runExtensionEvent(managedHarness.handlers, "session_start", { reason: "new" }, managedHarness.ctx);
+			const managedUrl = await executeRegisteredTool(managedHarness.tool, managedHarness.ctx, { args: ["--cdp", "9222", "get", "url"], sessionMode: "fresh" });
+			assert.equal(managedUrl.isError, false);
+			const managedSessionName = managedUrl.details?.sessionName;
+			assert.equal(typeof managedSessionName, "string");
+			await writeFile(unsafeTargetPath, "unsafe", "utf8");
+			const blockedManagedSnapshot = await executeRegisteredTool(managedHarness.tool, managedHarness.ctx, { args: ["snapshot", "-i"] });
+			assert.equal(blockedManagedSnapshot.isError, true);
+			assert.match((blockedManagedSnapshot.content[0]?.type === "text" ? blockedManagedSnapshot.content[0].text : "") ?? "", /local|file/i);
+			await rm(unsafeTargetPath, { force: true });
+			await runExtensionEvent(managedHarness.handlers, "session_tree", { newLeafId: null, oldLeafId: "attached-branch" }, managedHarness.ctx);
+			await runExtensionEvent(managedHarness.handlers, "session_shutdown", { reason: "quit" }, managedHarness.ctx);
+			const managedInvocations = (await readInvocationLog(logPath)).filter((entry) => entry.args.includes(managedSessionName as string));
+			assert.ok(managedInvocations.some((entry) => entry.args.includes("close")));
+			assert.ok(managedInvocations.every((entry) => !entry.args.includes("--args") && !entry.args.includes("--allow-file-access")));
+
+			const namespaceResumeInvocationCount = (await readInvocationLog(logPath)).length;
+			await withPatchedEnv({ AGENT_BROWSER_NAMESPACE: "changed-after-attach" }, async () => {
+				const namespaceResumeHarness = createExtensionHarness({
+					branch: [createToolBranchEntry({ details: managedUrl.details ?? {}, isError: managedUrl.isError })],
+					cwd: tempDir,
+					prompt: "Close the default-namespace attachment after the process environment namespace changes.",
+				});
+				await runExtensionEvent(namespaceResumeHarness.handlers, "session_start", { reason: "resume" }, namespaceResumeHarness.ctx);
+				await runExtensionEvent(namespaceResumeHarness.handlers, "session_shutdown", { reason: "quit" }, namespaceResumeHarness.ctx);
+			});
+			const namespaceResumeInvocations = (await readInvocationLog(logPath)).slice(namespaceResumeInvocationCount).filter((entry) => entry.args.includes(managedSessionName as string));
+			assert.ok(namespaceResumeInvocations.some((entry) => entry.args.includes("close")));
+			assert.ok(namespaceResumeInvocations.every((entry) => !entry.args.includes("--args") && !entry.args.includes("--allow-file-access")));
+
+			await withPatchedEnv({ PI_AGENT_BROWSER_TEST_FAIL_ATTACHED_GET_URL: "1" }, async () => {
+				const failedHarness = createExtensionHarness({ cwd: tempDir, prompt: "Clean up a failed attachment that still started its daemon." });
+				await runExtensionEvent(failedHarness.handlers, "session_start", { reason: "new" }, failedHarness.ctx);
+				const failedAttach = await executeRegisteredTool(failedHarness.tool, failedHarness.ctx, { args: ["--cdp", "9222", "get", "url"], sessionMode: "fresh" });
+				assert.equal(failedAttach.isError, true);
+				assert.equal((failedAttach.details?.managedSessionOutcome as { activeAfter?: boolean } | undefined)?.activeAfter, true);
+				assert.equal(failedAttach.details?.attachedBrowserSession, true);
+				const failedSessionName = failedAttach.details?.sessionName;
+				assert.equal(typeof failedSessionName, "string");
+				const failedInvocationCount = (await readInvocationLog(logPath)).length;
+				const failedResumeHarness = createExtensionHarness({
+					branch: [createToolBranchEntry({ details: failedAttach.details ?? {}, isError: failedAttach.isError })],
+					cwd: tempDir,
+					prompt: "Resume and clean up the failed attachment that retained an active daemon.",
+				});
+				await runExtensionEvent(failedResumeHarness.handlers, "session_start", { reason: "resume" }, failedResumeHarness.ctx);
+				await runExtensionEvent(failedResumeHarness.handlers, "session_shutdown", { reason: "quit" }, failedResumeHarness.ctx);
+				const failedInvocations = (await readInvocationLog(logPath)).slice(failedInvocationCount).filter((entry) => entry.args.includes(failedSessionName as string));
+				assert.ok(failedInvocations.some((entry) => entry.args.includes("close")));
+				assert.ok(failedInvocations.every((entry) => !entry.args.includes("--args") && !entry.args.includes("--allow-file-access")));
+			});
+
+			await withPatchedEnv({ AGENT_BROWSER_CDP: "9222" }, async () => {
+				const envHarness = createExtensionHarness({ cwd: tempDir, prompt: "Reuse the CDP endpoint configured in the environment." });
+				await runExtensionEvent(envHarness.handlers, "session_start", { reason: "new" }, envHarness.ctx);
+				const envUrl = await executeRegisteredTool(envHarness.tool, envHarness.ctx, { args: ["--session", "env-cdp", "get", "url"] });
+				const envSnapshot = await executeRegisteredTool(envHarness.tool, envHarness.ctx, { args: ["--session", "env-cdp", "snapshot", "-i"] });
+				assert.equal(envUrl.isError, false);
+				assert.equal(envSnapshot.isError, false);
+				assert.equal(envSnapshot.details?.attachedBrowserSession, true);
+				const envInvocations = (await readInvocationLog(logPath)).filter((entry) => entry.args.includes("env-cdp"));
+				assert.ok(envInvocations.every((entry) => !entry.args.includes("--args") && !entry.args.includes("--allow-file-access")));
+				await withPatchedEnv({ AGENT_BROWSER_CDP: undefined }, async () => {
+					const resumedEnvHarness = createExtensionHarness({
+						branch: [createToolBranchEntry({ details: envSnapshot.details ?? {}, isError: envSnapshot.isError })],
+						cwd: tempDir,
+						prompt: "Resume the environment-attached session without the original environment flag.",
+					});
+					await runExtensionEvent(resumedEnvHarness.handlers, "session_start", { reason: "resume" }, resumedEnvHarness.ctx);
+					const resumedEnvSnapshot = await executeRegisteredTool(resumedEnvHarness.tool, resumedEnvHarness.ctx, { args: ["--session", "env-cdp", "snapshot", "-i"] });
+					assert.equal(resumedEnvSnapshot.isError, false);
+				});
+			});
+		});
+	} finally {
+		await rm(tempDir, { force: true, recursive: true });
+	}
+});
+
 test("agentBrowserExtension passes through core command coverage fallback matrix", { concurrency: false }, async () => {
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-core-matrix-"));
 	const logPath = join(tempDir, "invocations.log");
@@ -351,15 +533,26 @@ test("agentBrowserExtension passes through core command coverage fallback matrix
 const path = require("node:path");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
-let commandIndex = args[0] === "--json" ? 1 : 0;
-if (args[commandIndex] === "--session") commandIndex += 2;
+const valueFlags = new Set(["--allow-file-access", "--namespace", "--session"]);
+let commandIndex = -1;
+for (let index = 0; index < args.length; index += 1) {
+  if (args[index] === "--json") continue;
+  if (valueFlags.has(args[index])) { index += 1; continue; }
+  if (args[index].startsWith("--")) continue;
+  commandIndex = index;
+  break;
+}
 const command = args[commandIndex] || "unknown";
+const subcommand = args[commandIndex + 1];
 const artifactPath = command === "download" || command === "screenshot" || command === "pdf" || (command === "wait" && args.includes("--download")) ? args[args.length - 1] : undefined;
 if (artifactPath) {
   fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
   fs.writeFileSync(artifactPath, "artifact");
 }
-const data = artifactPath ? { path: artifactPath } : { ok: true, command };
+const data = artifactPath ? { path: artifactPath }
+  : command === "get" && subcommand === "url" ? { result: "https://example.test/current", url: "https://example.test/current" }
+  : command === "get" && subcommand === "title" ? { result: "Example", title: "Example" }
+  : { ok: true, command };
 process.stdout.write(JSON.stringify({ success: true, data }));`,
 	);
 
@@ -402,7 +595,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 		["snapshot", "--interactive", "--selector", "main", "--cursor"],
 		["eval", "document.title"],
 		["eval", "-b", "ZG9jdW1lbnQudGl0bGU="],
-		["connect", "9222"],
+		["--session", "connector", "connect", "9222"],
 		["get", "url"],
 		["get", "cdp-url"],
 		["get", "box", "#button"],
@@ -437,7 +630,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 
 			for (const args of commands) {
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...args] });
-				assert.equal(result.isError, false, args.join(" "));
+				assert.equal(result.isError, false, `${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`);
 			}
 
 			const invocations = await readInvocationLog(logPath);
@@ -445,14 +638,16 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				.map((entry) => stripWrapperPrefix(entry.args))
 				.filter((args) => !(args.length === 2 && args[0] === "eval" && args[1] === "--stdin"));
 			const expectedInvocations = commands.flatMap((args) => {
-				const command = args[0];
-				if (command === "click" || (command === "tab" && args[1] === "close")) return [[...args], ["get", "url"], ["get", "title"]];
-				return command === "back" || command === "forward" || command === "reload" || command === "dblclick"
-					? [[...args], ["get", "url"], ["get", "title"]]
-					: [[...args]];
+				const normalizedArgs = stripWrapperPrefix([...args]);
+				const command = normalizedArgs[0];
+				if (["close", "exit", "quit"].includes(command ?? "")) return [["close"]];
+				if (command === "click" || (command === "tab" && normalizedArgs[1] === "close")) return [normalizedArgs, ["get", "url"], ["get", "title"]];
+				return command === "back" || command === "forward" || command === "reload" || command === "dblclick" || command === "eval"
+					? [normalizedArgs, ["get", "url"], ["get", "title"]]
+					: [normalizedArgs];
 			});
 			assert.deepEqual(commandInvocations, expectedInvocations);
-			assert.ok(invocations.every((entry) => entry.args[0] === "--json" && entry.args[1] === "--session"));
+			assert.ok(invocations.every((entry) => entry.args[0] === "--json" && entry.args.includes("--session")));
 		});
 	} finally {
 		await rm(tempDir, { force: true, recursive: true });
@@ -469,11 +664,20 @@ test("agentBrowserExtension passes through stateful browser-context workflow com
 		`const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
-const commandIndex = args.findIndex((arg) => !arg.startsWith("--") && args[args.indexOf("--session") + 1] !== arg);
+const valueFlags = new Set(["--allow-file-access", "--namespace", "--session"]);
+let commandIndex = -1;
+for (let index = 0; index < args.length; index += 1) {
+  if (args[index] === "--json") continue;
+  if (valueFlags.has(args[index])) { index += 1; continue; }
+  if (args[index].startsWith("--")) continue;
+  commandIndex = index;
+  break;
+}
 const command = args[commandIndex];
 const subcommand = args[commandIndex + 1];
 if (command === "state" && subcommand === "save") fs.writeFileSync(args[commandIndex + 2], "{}");
-const data = command === "auth" && subcommand === "list" ? { profiles: [{ name: "demo" }] }
+const data = command === "get" && subcommand === "url" ? { result: "https://example.test/current", url: "https://example.test/current" }
+  : command === "auth" && subcommand === "list" ? { profiles: [{ name: "demo" }] }
   : command === "auth" && subcommand === "show" ? { name: "demo", url: "https://example.test", username: "user@example.test" }
   : command === "cookies" && (subcommand === undefined || subcommand === "get") ? { cookies: [{ name: "sid", domain: "example.test", path: "/", value: "cookie-get-secret" }] }
   : command === "cookies" && subcommand === "set" ? { name: args[commandIndex + 2], value: args[commandIndex + 3], domain: "example.test" }
@@ -495,8 +699,9 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 		["auth", "remove", "demo"],
 		["state", "save", statePath],
 		["state", "load", statePath],
+		["get", "url"],
 		["state", "list"],
-		["state", "clear", "-a"],
+		["state", "clear", "caller-owned"],
 		["cookies", "get"],
 		["cookies", "set", "sid", "cookie-secret", "--url", "https://example.test"],
 		["cookies", "clear"],
@@ -520,7 +725,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 			let storageSetResult: Awaited<ReturnType<typeof executeRegisteredTool>> | undefined;
 			for (const args of commands) {
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...args] });
-				assert.equal(result.isError, false, args.join(" "));
+				assert.equal(result.isError, false, `${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`);
 				assert.doesNotMatch(result.content[0]?.text ?? "", /cookie-secret|cookie-get-secret|storage-secret/);
 				assert.doesNotMatch(JSON.stringify(result.details), /cookie-secret|cookie-get-secret|storage-secret/);
 				if (args[0] === "storage" && args[1] === "local" && args[2] === "set") storageSetResult = result;
@@ -544,7 +749,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 			assert.ok(invocations.every((entry) => {
 				const userArgs = stripWrapperPrefix(entry.args);
 				const isSessionlessAuth = userArgs[0] === "auth" && ["save", "list", "show", "delete", "remove"].includes(userArgs[1] ?? "");
-				const isSessionlessState = userArgs[0] === "state" && (userArgs[1] === "list" || (userArgs[1] === "clear" && userArgs[2] === "-a"));
+				const isSessionlessState = userArgs[0] === "state" && (userArgs[1] === "list" || (userArgs[1] === "clear" && userArgs[2] === "caller-owned"));
 				return isSessionlessAuth || isSessionlessState ? !entry.args.includes("--session") : entry.args.includes("--session");
 			}));
 		});
@@ -568,7 +773,7 @@ test("agentBrowserExtension passes through non-core network debug diff stream da
 const path = require("node:path");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, model: process.env.AI_GATEWAY_MODEL || null, apiKey: process.env.AI_GATEWAY_API_KEY || null }) + "\\n");
-const valueFlags = new Set(["--session", "--model", "--port", "--body", "--resource-type", "--baseline"]);
+const valueFlags = new Set(["--allow-file-access", "--session", "--model", "--port", "--body", "--resource-type", "--baseline"]);
 let commandIndex = -1;
 for (let i = 0; i < args.length; i += 1) {
   const token = args[i];
@@ -664,7 +869,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 			let networkRequestsResult: Awaited<ReturnType<typeof executeRegisteredTool>> | undefined;
 			for (const args of commands) {
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...args] });
-				assert.equal(result.isError, false, args.join(" "));
+				assert.equal(result.isError, false, `${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`);
 				assert.doesNotMatch(result.content[0]?.text ?? "", /route-secret|clipboard-secret|chat-secret/);
 				assert.doesNotMatch(JSON.stringify(result.details), /route-secret|clipboard-secret|chat-secret/);
 				if (args[0] === "network" && args[1] === "requests") networkRequestsResult = result;
@@ -831,11 +1036,15 @@ test("agentBrowserExtension normalizes and repairs explicit screenshot artifact 
 const path = require("node:path");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
-const commandIndex = args.indexOf("screenshot");
-const requestedPath = args[commandIndex + 1];
-fs.mkdirSync(path.dirname(${JSON.stringify(upstreamTempPath)}), { recursive: true });
-fs.writeFileSync(${JSON.stringify(upstreamTempPath)}, "fake-png");
-process.stdout.write(JSON.stringify({ success: true, data: { path: ${JSON.stringify(upstreamTempPath)} }, error: null }));`,
+if (args.includes("get") && args.includes("url")) {
+  process.stdout.write(JSON.stringify({ success: true, data: { url: "https://safe.example/" } }));
+} else {
+  const commandIndex = args.indexOf("screenshot");
+  const requestedPath = args[commandIndex + 1];
+  fs.mkdirSync(path.dirname(${JSON.stringify(upstreamTempPath)}), { recursive: true });
+  fs.writeFileSync(${JSON.stringify(upstreamTempPath)}, "fake-png");
+  process.stdout.write(JSON.stringify({ success: true, data: { path: ${JSON.stringify(upstreamTempPath)} }, error: null }));
+}`,
 	);
 
 	try {
@@ -868,8 +1077,9 @@ process.stdout.write(JSON.stringify({ success: true, data: { path: ${JSON.string
 			assert.equal(artifacts?.[0]?.session, "warden-vfr");
 			assert.equal(artifacts?.[0]?.status, "repaired-from-temp");
 
-			const [invocation] = await readInvocationLog(logPath);
-			assert.equal(invocation.args.at(-1), expectedPath);
+			const invocations = await readInvocationLog(logPath);
+			assert.deepEqual(invocations[0]?.args.at(-2), "get");
+			assert.equal(invocations.at(-1)?.args.at(-1), expectedPath);
 		});
 	} finally {
 		await rm(tempDir, { force: true, recursive: true });
@@ -1001,7 +1211,9 @@ test("agentBrowserExtension guards wrapper-known trace and profiler ownership", 
 	const basePath = process.env.PATH ?? "";
 	await writeFakeAgentBrowserBinary(
 		tempDir,
-		`process.stdout.write(JSON.stringify({ success: true, data: { started: true }, error: null }));`,
+		`const args = process.argv.slice(2);
+const data = args.includes("get") && args.includes("url") ? { url: "https://safe.example/" } : { started: true };
+process.stdout.write(JSON.stringify({ success: true, data, error: null }));`,
 	);
 
 	try {
