@@ -52,6 +52,23 @@ import {
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
 
+async function initializeSecureGitProject(path: string): Promise<void> {
+	execFileSync("git", ["init", "-q", path], { stdio: "ignore" });
+	if (process.platform !== "win32") await chmod(join(path, ".git"), 0o700);
+}
+
+test("initializeSecureGitProject normalizes permissive Git metadata", { concurrency: false, skip: process.platform === "win32" }, async () => {
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-secure-git-fixture-"));
+	try {
+		await mkdir(join(tempDir, ".git"), { mode: 0o775 });
+		await chmod(join(tempDir, ".git"), 0o775);
+		await initializeSecureGitProject(tempDir);
+		assert.equal((await stat(join(tempDir, ".git"))).mode & 0o777, 0o700);
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
+});
+
 test("resolveSpawnedChildExitCode prefers close, then timeout, then exit fallback", () => {
 	assert.equal(
 		resolveSpawnedChildExitCode({
@@ -785,7 +802,7 @@ if (args.includes("session") && args.includes("info")) {
 }`,
 	);
 
-	execFileSync("git", ["init", "-q", tempDir], { stdio: "ignore" });
+	await initializeSecureGitProject(tempDir);
 	try {
 		await withPatchedEnv({ HOME: tempDir, PATH: `${tempDir}${delimiter}${basePath}` }, async () => {
 			const harness = createExtensionHarness({ cwd: tempDir });
@@ -873,7 +890,7 @@ test("runAgentBrowserProcess pins owned namespace and config after planning", { 
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-namespace-env-"));
 	const basePath = process.env.PATH ?? "";
 	await writeFakeAgentBrowserBinary(tempDir, `const fs = require("node:fs"); const config = process.env.AGENT_BROWSER_CONFIG; process.stdout.write(JSON.stringify({ success: true, data: { args: process.argv.slice(2), config, configContent: config ? fs.readFileSync(config, "utf8") : null, encryptionKey: process.env.AGENT_BROWSER_ENCRYPTION_KEY ?? null, home: process.env.HOME ?? null, namespace: process.env.AGENT_BROWSER_NAMESPACE ?? null, restore: process.env.AGENT_BROWSER_RESTORE ?? null } }));`);
-	execFileSync("git", ["init", "-q", tempDir], { stdio: "ignore" });
+	await initializeSecureGitProject(tempDir);
 	try {
 		await withPatchedEnv({ AGENT_BROWSER_NAMESPACE: "redirected", HOME: tempDir, PATH: `${tempDir}${delimiter}${basePath}` }, async () => {
 			const restoreState = new ManagedSessionRestoreState();
@@ -932,7 +949,7 @@ test("runAgentBrowserProcess refuses a changed checkout identity before spawning
 	const basePath = process.env.PATH ?? "";
 	const startedPath = join(tempDir, "started");
 	await writeFakeAgentBrowserBinary(tempDir, `require("node:fs").writeFileSync(${JSON.stringify(startedPath)}, "started");`);
-	execFileSync("git", ["init", "-q", tempDir], { stdio: "ignore" });
+	await initializeSecureGitProject(tempDir);
 	try {
 		await withPatchedEnv({ HOME: tempDir, PATH: `${tempDir}${delimiter}${basePath}` }, async () => {
 			const restoreState = new ManagedSessionRestoreState();
@@ -966,7 +983,7 @@ test("runAgentBrowserProcess refuses incompatible environment changes after plan
 	const basePath = process.env.PATH ?? "";
 	const startedPath = join(tempDir, "started");
 	await writeFakeAgentBrowserBinary(tempDir, `require("node:fs").writeFileSync(${JSON.stringify(startedPath)}, "started");`);
-	execFileSync("git", ["init", "-q", tempDir], { stdio: "ignore" });
+	await initializeSecureGitProject(tempDir);
 	try {
 		await withPatchedEnv({ HOME: tempDir, PATH: `${tempDir}${delimiter}${basePath}` }, async () => {
 			const restoreState = new ManagedSessionRestoreState();
@@ -994,7 +1011,7 @@ test("runAgentBrowserProcess blocks foreign managed-state capabilities at the sp
 	const basePath = process.env.PATH ?? "";
 	const startedPath = join(tempDir, "started");
 	await writeFakeAgentBrowserBinary(tempDir, `require("node:fs").writeFileSync(${JSON.stringify(startedPath)}, "started");`);
-	execFileSync("git", ["init", "-q", tempDir], { stdio: "ignore" });
+	await initializeSecureGitProject(tempDir);
 	try {
 		await withPatchedEnv({ PATH: `${tempDir}${delimiter}${basePath}` }, async () => {
 			const currentKey = createManagedSessionRestoreKey(tempDir);
@@ -1043,7 +1060,7 @@ test("runAgentBrowserProcess reports protected restore-config setup failures bef
 	const basePath = process.env.PATH ?? "";
 	const startedPath = join(tempDir, "started");
 	await writeFakeAgentBrowserBinary(tempDir, `require("node:fs").writeFileSync(${JSON.stringify(startedPath)}, "started");`);
-	execFileSync("git", ["init", "-q", tempDir], { stdio: "ignore" });
+	await initializeSecureGitProject(tempDir);
 	try {
 		await withPatchedEnv({ HOME: tempDir, PATH: `${tempDir}${delimiter}${basePath}`, PI_AGENT_BROWSER_TEMP_ROOT_MAX_BYTES: "1" }, async () => {
 			const restoreState = new ManagedSessionRestoreState();
@@ -1076,7 +1093,7 @@ test("runAgentBrowserProcess suppresses visible restore autosave tabs for headed
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-headed-autosave-"));
 	const basePath = process.env.PATH ?? "";
 	await writeFakeAgentBrowserBinary(tempDir, `process.stdout.write(JSON.stringify({ success: true, data: { autosave: process.env.AGENT_BROWSER_AUTOSAVE_INTERVAL_MS ?? null } }));`);
-	execFileSync("git", ["init", "-q", tempDir], { stdio: "ignore" });
+	await initializeSecureGitProject(tempDir);
 
 	try {
 		for (const [sessionName, launchArgs, parentAutosave, env, ownedManagedSession, expected, retainedHeadedDefault] of [
