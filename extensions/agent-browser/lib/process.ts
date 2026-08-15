@@ -597,6 +597,7 @@ export async function runAgentBrowserProcess(options: {
 		let stdoutTail = "";
 		let stdoutSpillHandle: Awaited<ReturnType<typeof openSecureTempFile>>["fileHandle"] | undefined;
 		let stdoutSpillPath: string | undefined;
+		let stdoutSpillStarted = false;
 		let pendingStdoutWrite = Promise.resolve();
 		let stdoutSpillError: Error | undefined;
 		let killTimer: NodeJS.Timeout | undefined;
@@ -608,11 +609,12 @@ export async function runAgentBrowserProcess(options: {
 		const queueStdoutChunk = (buffer: Buffer) => {
 			stdoutTail = appendTail(stdoutTail, buffer.toString("utf8"), MAX_BUFFERED_STDOUT_TAIL_CHARS);
 			if (stdoutSpillError) return;
-			if (!stdoutSpillPath && stdoutBufferedBytes + buffer.length <= MAX_BUFFERED_STDOUT_BYTES) {
+			if (!stdoutSpillStarted && stdoutBufferedBytes + buffer.length <= MAX_BUFFERED_STDOUT_BYTES) {
 				stdoutBuffers.push(buffer);
 				stdoutBufferedBytes += buffer.length;
 				return;
 			}
+			stdoutSpillStarted = true;
 
 			pendingStdoutWrite = pendingStdoutWrite
 				.then(async () => {

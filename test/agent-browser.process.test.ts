@@ -666,6 +666,7 @@ test("runAgentBrowserProcess spills oversized stdout while parseAgentBrowserEnve
 		return `- generic \"Large process snapshot row ${index + 1} that forces stdout spilling without losing parseability\" [ref=${ref}] clickable [onclick]`;
 	}).join("\\n");
 	const refsLiteral = Array.from({ length: 80 }, (_, index) => `e${index + 1}: { name: "Action ${index + 1}", role: "button" }`).join(",");
+	// Cross the spill threshold with a large chunk, then immediately emit a small chunk that could race async file creation.
 	await writeFile(
 		fakeAgentBrowserPath,
 		`#!/usr/bin/env node
@@ -677,7 +678,13 @@ const envelope = {
     snapshot: ${JSON.stringify(bigSnapshotRows)}
   }
 };
-process.stdout.write(JSON.stringify(envelope));
+const output = JSON.stringify(envelope);
+const prefixLength = 512 * 1024 - 12_000;
+process.stdout.write(output.slice(0, prefixLength), () => {
+  process.stdout.write(output.slice(prefixLength, prefixLength + 65_536));
+  process.stdout.write(output.slice(prefixLength + 65_536, prefixLength + 75_536));
+  process.stdout.write(output.slice(prefixLength + 75_536));
+});
 `,
 		"utf8",
 	);
@@ -692,7 +699,13 @@ process.stdout.write(JSON.stringify(envelope));
     snapshot: ${JSON.stringify(bigSnapshotRows)}
   }
 };
-process.stdout.write(JSON.stringify(envelope));`,
+const output = JSON.stringify(envelope);
+const prefixLength = 512 * 1024 - 12_000;
+process.stdout.write(output.slice(0, prefixLength), () => {
+  process.stdout.write(output.slice(prefixLength, prefixLength + 65_536));
+  process.stdout.write(output.slice(prefixLength + 65_536, prefixLength + 75_536));
+  process.stdout.write(output.slice(prefixLength + 75_536));
+});`,
 		);
 	} else {
 		await chmod(fakeAgentBrowserPath, 0o755);
