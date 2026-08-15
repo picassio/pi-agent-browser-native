@@ -1505,7 +1505,7 @@ if (args.includes("session") && args.includes("info")) {
 });
 
 test("agentBrowserExtension reports managed-session outcomes after failed fresh launches", { concurrency: false }, async (context) => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-managed-session-outcome-"));
+	const tempDir = await mkdtemp(join(tmpdir(), "pab-outcome-"));
 	const socketDir = `/tmp/${process.pid.toString(36)}`;
 	await rm(socketDir, { force: true, recursive: true });
 	await mkdir(socketDir, { mode: 0o700 });
