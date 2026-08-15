@@ -66,11 +66,14 @@ test("startup budget tolerates host jitter but rejects sustained regressions", (
 	assert.equal(summarizeStartupValues([251, 270, 280], STARTUP_BUDGET_MS).withinBudget, false);
 });
 
-test("startup path imports only the pi-tui modules it uses", async () => {
-	for (const path of ["extensions/agent-browser/index.ts", "extensions/agent-browser/lib/pi-tool-rendering.ts"]) {
-		const source = await readFile(path, "utf8");
-		assert.doesNotMatch(source, /from ["']@earendil-works\/pi-tui["']/, `${path} should not load the pi-tui barrel`);
-	}
+test("startup path defers the host pi-tui barrel through its supported package alias", async () => {
+	const entrypointSource = await readFile("extensions/agent-browser/index.ts", "utf8");
+	const renderingSource = await readFile("extensions/agent-browser/lib/pi-tool-rendering.ts", "utf8");
+	assert.doesNotMatch(entrypointSource, /["']@earendil-works\/pi-tui(?:\/[^"']*)?["']/, "entrypoint should not eagerly load pi-tui");
+	assert.doesNotMatch(renderingSource, /["']@earendil-works\/pi-tui\/[^"']+["']/, "Pi package aliases do not support pi-tui deep imports");
+	assert.doesNotMatch(renderingSource, /import\s+(?!type\b)[^;]+from\s+["']@earendil-works\/pi-tui["']/, "rendering should not eagerly load the pi-tui barrel");
+	assert.match(renderingSource, /await import\(["']@earendil-works\/pi-tui["']\)/, "session initialization should use Pi's supported root alias");
+	assert.match(entrypointSource, /session_start[\s\S]+await initializeAgentBrowserTui\(\);[\s\S]+restoreBranchBackedState/, "TUI initialization should complete before session restoration can render rows");
 });
 
 test("agent_browser cold startup stays below the issue #84 regression budget", async () => {

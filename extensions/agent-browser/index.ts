@@ -9,7 +9,6 @@ import type {
 	ExtensionContext,
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui/dist/components/text.js";
 import { batchHasSuccessfulCloseAll, getSuccessfulBatchCloseLifecycle } from "./lib/batch-lifecycle.js";
 import {
 	PROJECT_RULE_PROMPT,
@@ -94,10 +93,12 @@ import {
 	looksLikeDirectAgentBrowserBash,
 } from "./lib/bash-guard.js";
 import {
+	AgentBrowserCallComponent,
 	AgentBrowserResultComponent,
 	buildAgentBrowserToolResultPatch,
 	formatAgentBrowserRenderCall,
 	formatAgentBrowserRenderResult,
+	initializeAgentBrowserTui,
 } from "./lib/pi-tool-rendering.js";
 
 type BashToolCallLike = {
@@ -1374,6 +1375,7 @@ export default function agentBrowserExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
+		await initializeAgentBrowserTui();
 		restoreBranchBackedState(ctx, { resetRuntimeOwnership: true });
 		electronChildProcesses = new Map<string, ChildProcess>();
 		registerWebSearchToolIfAvailable(loadAgentBrowserConfigSync({
@@ -1521,9 +1523,11 @@ export default function agentBrowserExtension(pi: ExtensionAPI) {
 		promptGuidelines: toolPromptGuidelines,
 		parameters: AGENT_BROWSER_PARAMS,
 		renderCall(args, theme, context) {
-			const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
-			text.setText(formatAgentBrowserRenderCall(args, theme, context.expanded));
-			return text;
+			const component = context.lastComponent instanceof AgentBrowserCallComponent
+				? context.lastComponent
+				: new AgentBrowserCallComponent();
+			component.setState(formatAgentBrowserRenderCall(args, theme, context.expanded));
+			return component;
 		},
 		renderResult(result, options, theme, context) {
 			const component = context.lastComponent instanceof AgentBrowserResultComponent

@@ -1,7 +1,5 @@
 import type { AgentToolResult, Theme, ToolResultEvent } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui/dist/components/text.js";
-import { getKeybindings } from "@earendil-works/pi-tui/dist/keybindings.js";
-import { truncateToWidth } from "@earendil-works/pi-tui/dist/utils.js";
+import type { Text as PiTuiText } from "@earendil-works/pi-tui";
 
 import { compileAgentBrowserElectron } from "./input-modes/electron.js";
 import { compileAgentBrowserJob, compileAgentBrowserQaPreset } from "./input-modes/job.js";
@@ -17,6 +15,18 @@ const JSON_TOKEN_PATTERN = /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:
 const UNSAFE_DISPLAY_CONTROL_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]/g;
 const UNSAFE_DISPLAY_DIRECTIONAL_PATTERN = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 const UNSAFE_DISPLAY_ZERO_WIDTH_PATTERN = /[\u200B-\u200D\u2060\uFEFF]/g;
+
+type PiTuiRuntime = Pick<typeof import("@earendil-works/pi-tui"), "Text" | "getKeybindings" | "truncateToWidth">;
+let piTuiRuntime: PiTuiRuntime | undefined;
+
+export async function initializeAgentBrowserTui(): Promise<void> {
+	piTuiRuntime ??= await import("@earendil-works/pi-tui");
+}
+
+function getPiTuiRuntime(): PiTuiRuntime {
+	if (!piTuiRuntime) throw new Error("Agent Browser TUI rendering was used before session_start initialization.");
+	return piTuiRuntime;
+}
 
 function sanitizeDisplayText(value: string, markRemovedSequences = false): string {
 	let sanitized = value
@@ -92,16 +102,15 @@ function colorizeToolOutputLines(outputText: string, theme: Theme, isError: bool
 
 // ponytail: "app.tools.expand" is a host-registered keybinding id (coding-agent augments pi-tui's
 // Keybindings via declaration merging); getKeys returns [] before the host registers its ids
-// (bare-node tests), so fall back to the stock ctrl+o. pi-tui is already a runtime import at
-// the entrypoint, so getKeybindings() adds no startup tax.
+// (bare-node tests), so fall back to the stock ctrl+o.
 function formatExpandHint(theme: Theme): string {
-	const key = getKeybindings().getKeys("app.tools.expand")[0] ?? "ctrl+o";
+	const key = getPiTuiRuntime().getKeybindings().getKeys("app.tools.expand")[0] ?? "ctrl+o";
 	return `${theme.fg("dim", key)} ${theme.fg("muted", "to expand")}`;
 }
 
 function formatVisualTruncationNotice(remainingLines: number, totalLines: number, theme: Theme, width: number): string {
 	const notice = `${theme.fg("muted", `... (${remainingLines} more lines, ${totalLines} total, `)}${formatExpandHint(theme)}${theme.fg("muted", ")")}`;
-	return truncateToWidth(notice, Math.max(0, width));
+	return getPiTuiRuntime().truncateToWidth(notice, Math.max(0, width));
 }
 
 function getStructuredModeInvocation(input: Record<string, unknown>): { mode?: string; rawArgs: string[]; scriptSource?: string } {
@@ -250,10 +259,26 @@ export function buildAgentBrowserToolResultPatch(event: ToolResultEvent): AgentB
 	};
 }
 
+export class AgentBrowserCallComponent {
+	private readonly text: PiTuiText = new (getPiTuiRuntime().Text)("", 0, 0);
+
+	setState(value: string): void {
+		this.text.setText(value);
+	}
+
+	render(width: number): string[] {
+		return this.text.render(width);
+	}
+
+	invalidate(): void {
+		this.text.invalidate();
+	}
+}
+
 export class AgentBrowserResultComponent {
 	private expanded = false;
 	private theme: Theme | undefined;
-	private readonly text = new Text("", 0, 0);
+	private readonly text: PiTuiText = new (getPiTuiRuntime().Text)("", 0, 0);
 
 	setState(value: string, expanded: boolean, theme: Theme): void {
 		this.text.setText(value);
