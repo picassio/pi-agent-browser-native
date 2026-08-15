@@ -1,5 +1,7 @@
 import type { AgentToolResult, Theme, ToolResultEvent } from "@earendil-works/pi-coding-agent";
-import { getKeybindings, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui/dist/components/text.js";
+import { getKeybindings } from "@earendil-works/pi-tui/dist/keybindings.js";
+import { truncateToWidth } from "@earendil-works/pi-tui/dist/utils.js";
 
 import { compileAgentBrowserElectron } from "./input-modes/electron.js";
 import { compileAgentBrowserJob, compileAgentBrowserQaPreset } from "./input-modes/job.js";

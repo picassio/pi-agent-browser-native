@@ -66,6 +66,13 @@ test("startup budget tolerates host jitter but rejects sustained regressions", (
 	assert.equal(summarizeStartupValues([251, 270, 280], STARTUP_BUDGET_MS).withinBudget, false);
 });
 
+test("startup path imports only the pi-tui modules it uses", async () => {
+	for (const path of ["extensions/agent-browser/index.ts", "extensions/agent-browser/lib/pi-tool-rendering.ts"]) {
+		const source = await readFile(path, "utf8");
+		assert.doesNotMatch(source, /from ["']@earendil-works\/pi-tui["']/, `${path} should not load the pi-tui barrel`);
+	}
+});
+
 test("agent_browser cold startup stays below the issue #84 regression budget", async () => {
 	const entrypoint = await getPackageExtensionEntrypoint();
 	assert.equal(entrypoint, "./dist/extensions/agent-browser/index.js");

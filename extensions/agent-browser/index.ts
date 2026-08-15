@@ -9,7 +9,7 @@ import type {
 	ExtensionContext,
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui/dist/components/text.js";
 import { batchHasSuccessfulCloseAll, getSuccessfulBatchCloseLifecycle } from "./lib/batch-lifecycle.js";
 import {
 	PROJECT_RULE_PROMPT,
