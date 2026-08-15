@@ -250,7 +250,7 @@ async function pollDevToolsActivePort(options: {
 		}
 		await sleep(ELECTRON_DEVTOOLS_POLL_INTERVAL_MS, options.signal);
 	}
-	return { devToolsActivePort, failure: "timeout" };
+	return { devToolsActivePort: devToolsActivePort ?? (await readDevToolsActivePort(options.userDataDir)), failure: "timeout" };
 }
 
 async function pollCdpMetadata(port: number, deadlineMs: number, signal?: AbortSignal): Promise<{ aborted: boolean; metadata?: { targets: ElectronCdpTarget[]; version: ElectronCdpVersion } }> {

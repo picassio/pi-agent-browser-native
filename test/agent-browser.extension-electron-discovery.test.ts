@@ -202,10 +202,12 @@ test("agentBrowserExtension cleans Electron resources when launch fails before u
 		const tempDir = await mkdtemp(join(tmpdir(), `pi-agent-browser-electron-failed-${mode}-`));
 		const applicationsDir = join(tempDir, "Applications");
 		const launchLogPath = join(tempDir, "electron-launch.log");
+		const upstreamLogPath = join(tempDir, "agent-browser.log");
 		try {
 			await mkdir(applicationsDir, { recursive: true });
 			const app = await writeFakeLaunchableElectronApp({ applicationsDir, bundleId: `com.example.${mode}`, launchLogPath, mode, name: `Failed ${mode}`, writeLaunchLog });
-			await withPatchedEnv({ PATH: dirname(process.execPath) }, async () => {
+			await writeFakeAgentBrowserBinary(tempDir, fakeAgentBrowserLifecycleScript(upstreamLogPath));
+			await withPatchedEnv({ PATH: `${tempDir}:${dirname(process.execPath)}` }, async () => {
 				const harness = createExtensionHarness({ cwd: tempDir });
 				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -238,6 +240,7 @@ test("agentBrowserExtension cleans Electron resources when launch fails before u
 				}
 				await assert.rejects(stat(diagnosticUserDataDir));
 				assert.equal(isTestPidAlive(diagnosticPid), false, mode);
+				assert.deepEqual(await readInvocationLog(upstreamLogPath), [], mode);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
