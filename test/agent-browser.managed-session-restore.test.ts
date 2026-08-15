@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -842,7 +842,7 @@ test("managed restore pins a trusted canonical HOME and rejects writable ancestr
 			const options = { args: ["--session", "piab-home-anchor", "open", "https://example.com"], cwd: isolatedProject };
 			const restoreEnv = getManagedSessionRestoreEnv(options);
 			assert.equal(getManagedSessionRestoreProtectedEnv(options, restoreEnv).HOME, realpathSync(home));
-			rmSync(link);
+			unlinkSync(link);
 			symlinkSync(alternate, link, "dir");
 			assert.equal(getManagedSessionRestoreProtectedEnv(options, restoreEnv).HOME, realpathSync(home));
 		});
