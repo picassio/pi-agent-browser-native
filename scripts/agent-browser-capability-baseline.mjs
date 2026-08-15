@@ -1,11 +1,13 @@
 /**
  * Purpose: Define the canonical upstream agent-browser capability baseline targeted by this package.
- * Responsibilities: Store the target upstream version, sampled help commands, and verifier/doc token expectations in one importable metadata object.
+ * Responsibilities: Combine the canonical target from agent-browser-target.mjs with sampled help commands and verifier/doc token expectations.
  * Scope: Versioned capability metadata only; it does not execute agent-browser or validate documentation by itself.
- * Usage: Imported by command-reference verifier, generated docs checker, and tests when upstream agent-browser is re-baselined.
+ * Usage: Imported by command-reference verifier, generated docs checker, and tests when upstream agent-browser is re-baselined; runtime imports only agent-browser-target.mjs.
  * Invariants/Assumptions: This package targets the current installed upstream agent-browser only and does not keep compatibility shims for older versions.
  * Related: `docs/SUPPORT_MATRIX.md` maps `CAPABILITY_BASELINE.inventorySections` to human docs, runtime behavior, tests, and verification gates; refresh that matrix whenever this baseline changes.
  */
+
+import { TARGET_AGENT_BROWSER_VERSION } from "./agent-browser-target.mjs";
 
 export const CAPABILITY_BASELINE_SOURCE = "scripts/agent-browser-capability-baseline.mjs";
 export const COMMAND_REFERENCE_DOC_PATH = "docs/COMMAND_REFERENCE.md";
@@ -14,8 +16,8 @@ export const COMMAND_REFERENCE_BASELINE_BLOCK_IDS = Object.freeze(["upstream-bas
 
 const sourceEvidence = Object.freeze({
   repository: "vercel-labs/agent-browser",
-  upstreamHead: "93cdda5709e8861c0c26b0b955d8d746e9fda0d7",
-  upstreamPackageVersion: "0.33.2",
+  upstreamHead: "548b159b30eef119ccf6846c8bc807d0eaa3f6f8",
+  upstreamPackageVersion: "0.34.0",
   inspectedSources: Object.freeze([
     "agent-browser --version",
     "agent-browser --help",
@@ -36,6 +38,7 @@ const sourceEvidence = Object.freeze({
     "cli/src/native/actions.rs",
     "cli/src/native/a11y/mod.rs",
     "cli/src/native/browser.rs",
+    "cli/src/native/tab_binding.rs",
     "cli/src/native/daemon.rs",
     "cli/src/output.rs",
     "docs/src/app/webgpu/page.mdx",
@@ -365,6 +368,10 @@ const inventorySections = Object.freeze([
       "tab new --label <name> [url]",
       "tab close [target]",
       "tab <t<N>|label>",
+      "tab_gone",
+      "data.targetId",
+      "data.lastUrl",
+      "CDP target ids",
       "frame <selector|main>",
       "dialog accept [text]",
       "dialog dismiss",
@@ -387,8 +394,13 @@ const inventorySections = Object.freeze([
       ["state help", "clean --older-than <days>"],
       ["tab help", "new [url]"],
       ["tab help", "new --label <name> [url]"],
-      ["tab help", "close [t<N>|label]"],
+      ["tab help", "close [t<N>|label|target]"],
       ["tab help", "Stable tab ids"],
+      ["tab help", "tab_gone"],
+      ["tab help", "data.targetId"],
+      ["tab help", "data.lastUrl"],
+      ["core skill full", "--pin-tab"],
+      ["core skill full", "tab_gone"],
       ["frame help", "frame <selector|main>"],
       ["dialog help", "dialog <accept|dismiss|status> [text]"],
       ["window help", "window <operation>"],
@@ -615,6 +627,9 @@ const inventorySections = Object.freeze([
       "AGENT_BROWSER_STATE",
       "--auto-connect",
       "AGENT_BROWSER_AUTO_CONNECT",
+      "--pin-tab",
+      "--no-pin-tab",
+      "AGENT_BROWSER_PIN_TAB",
       "--headers <json>",
       "--init-script <path>",
       "AGENT_BROWSER_INIT_SCRIPTS",
@@ -759,6 +774,9 @@ const inventorySections = Object.freeze([
       root("AGENT_BROWSER_STATE"),
       root("--auto-connect"),
       root("AGENT_BROWSER_AUTO_CONNECT"),
+      root("--pin-tab"),
+      root("--no-pin-tab"),
+      root("AGENT_BROWSER_PIN_TAB"),
       root("--headers <json>"),
       root("--init-script <path>"),
       root("AGENT_BROWSER_INIT_SCRIPTS"),
@@ -852,7 +870,7 @@ const inventorySections = Object.freeze([
 ]);
 
 export const CAPABILITY_BASELINE = Object.freeze({
-  targetVersion: "0.33.2",
+  targetVersion: TARGET_AGENT_BROWSER_VERSION,
   sourceEvidence,
   helpCommands,
   inventorySections,

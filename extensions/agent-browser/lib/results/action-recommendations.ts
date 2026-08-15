@@ -163,9 +163,7 @@ export function buildAgentBrowserNextActions(options: {
 			actions.push(buildArtifactAction(options.savedFilePath));
 		}
 		for (const artifact of artifacts) {
-			if (isPendingRecordingArtifact(artifact)) {
-				continue;
-			}
+			if (isPendingRecordingArtifact(artifact)) continue;
 			if (artifact.exists === false) {
 				if (artifact.kind === "download") {
 					actions.push(buildNextToolAction({
@@ -187,7 +185,7 @@ export function buildAgentBrowserNextActions(options: {
 		switch (options.failureCategory) {
 			case "artifact-missing":
 				for (const artifact of options.artifacts ?? []) {
-					if (isPendingRecordingArtifact(artifact) || artifact.exists !== false) continue;
+					if (isPendingRecordingArtifact(artifact) || (artifact.exists !== false && artifact.status !== "stale")) continue;
 					if (artifact.kind === "download") {
 						actions.push(buildNextToolAction({
 							args: ["wait", "--download", artifact.path],
@@ -265,6 +263,22 @@ export function buildAgentBrowserNextActions(options: {
 					}));
 				}
 				break;
+			case "tab-gone":
+				actions.push(
+					buildNextToolAction({
+						args: ["tab", "list"],
+						id: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.tabGoneListTabs,
+						reason: "The pinned bound tab is gone; inspect remaining tabs before acting on a neighbor.",
+						safety: "Read-only. Prefer a listed tab id, label, or CDP targetId, or open a new tab to rebind.",
+					}),
+					buildNextToolAction({
+						args: ["tab", "new"],
+						id: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.tabGoneNewTab,
+						reason: "Bind a fresh tab after tab_gone instead of continuing on another session's page.",
+						safety: "Opens a new tab in this session and rebinds the pin; pass a URL if you know the intended page.",
+					}),
+				);
+				break;
 			case "tab-drift":
 				if (options.recovery?.kind === "about-blank" || options.recovery?.kind === "tab-drift") {
 					break;
@@ -279,6 +293,14 @@ export function buildAgentBrowserNextActions(options: {
 				);
 				break;
 		}
+	}
+	if ((options.artifacts ?? []).some(isPendingRecordingArtifact)) {
+		actions.push(buildNextToolAction({
+			args: ["record", "stop"],
+			id: "stop-pending-recording",
+			reason: "Stop the active recording so the requested video can be finalized and verified on disk.",
+			safety: "The file remains pending until record stop succeeds; verify details.artifactVerification afterward.",
+		}));
 	}
 	return applySessionToNextActions(actions.length > 0 ? actions : undefined, options.sessionName);
 }
