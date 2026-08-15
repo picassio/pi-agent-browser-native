@@ -230,6 +230,13 @@ function checkAgentBrowserVersion(expectedVersion, failures, command = "agent-br
 	else fail(`${command} version ${firstLine} does not match expected ${expectedVersion}`, failures);
 }
 
+export function inspectUbuntuImage(image, run = silent) {
+	const imageId = run("docker", ["image", "inspect", "--format", "{{.Id}}", image]);
+	return imageId
+		? { ok: true, message: `Ubuntu image: ${image}` }
+		: { ok: false, message: `Ubuntu image unavailable: ${image}; run npm run smoke:platform:ubuntu-image` };
+}
+
 export async function runDoctor(config) {
 	const failures = { count: 0 };
 	const packageName = config?.packageName ?? "pi-agent-browser-native";
@@ -302,7 +309,9 @@ export async function runDoctor(config) {
 	if (dockerVersion) ok(`Docker ${dockerVersion}`);
 	else fail("Docker is not available or not running", failures);
 	const ubuntuImage = env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config?.ubuntuContainerImage || DEFAULT_UBUNTU_IMAGE;
-	ok(`Ubuntu image: ${ubuntuImage}`);
+	const ubuntuImageInspection = inspectUbuntuImage(ubuntuImage);
+	if (ubuntuImageInspection.ok) ok(ubuntuImageInspection.message);
+	else fail(ubuntuImageInspection.message, failures);
 
 	console.log("\n── macOS SSH ──");
 	const sshUser = env("PLATFORM_SMOKE_MAC_USER") || env("USER");

@@ -49,6 +49,24 @@ test("platform smoke scripts have working syntax and help", () => {
 	assert.match(help.stdout, /agent-browser/);
 });
 
+test("platform doctor fails a missing Ubuntu image with rebuild guidance", () => {
+	const code = String.raw`
+import { inspectUbuntuImage } from "./scripts/platform-smoke/doctor.mjs";
+const calls = [];
+const missing = inspectUbuntuImage("missing-platform-image:test", (command, args) => {
+  calls.push([command, args]);
+  return null;
+});
+const present = inspectUbuntuImage("present-platform-image:test", () => "sha256:present");
+console.log(JSON.stringify({ calls, missing, present }));
+if (missing.ok || !missing.message.includes("npm run smoke:platform:ubuntu-image")) process.exit(1);
+if (!present.ok || !present.message.includes("present-platform-image:test")) process.exit(1);
+if (JSON.stringify(calls) !== JSON.stringify([["docker", ["image", "inspect", "--format", "{{.Id}}", "missing-platform-image:test"]]])) process.exit(1);
+`;
+	const result = run(process.execPath, ["--input-type=module", "-e", code]);
+	assert.equal(result.status, 0, result.stderr + result.stdout);
+});
+
 test("platform smoke config and package scripts require macOS, Ubuntu, and native Windows", () => {
 	const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
 		files?: string[];
