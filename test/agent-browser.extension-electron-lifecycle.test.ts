@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -529,6 +529,7 @@ test("agentBrowserExtension applies managed restore policy to every current-sess
 	const upstreamLogPath = join(tempDir, "agent-browser.log");
 	const basePath = process.env.PATH ?? "";
 	execFileSync("git", ["init", "-q", tempDir], { stdio: "ignore" });
+	if (process.platform !== "win32") await chmod(join(tempDir, ".git"), 0o700);
 	await writeFakeAgentBrowserBinary(tempDir, fakeAgentBrowserLifecycleScript(upstreamLogPath));
 	try {
 		await withPatchedEnv({
