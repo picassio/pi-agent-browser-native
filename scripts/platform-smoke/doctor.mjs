@@ -8,6 +8,7 @@ import { CAPABILITY_BASELINE } from "../agent-browser-capability-baseline.mjs";
 import { buildTargetBaseArgs } from "./crabbox-runner.mjs";
 
 const DEFAULT_UBUNTU_IMAGE = `pi-agent-browser-native-platform:node24-agent-browser${CAPABILITY_BASELINE.targetVersion}`;
+export const NPM_PACK_INSPECTION_TIMEOUT_MS = 120_000;
 
 function env(name) {
 	return process.env[name] ?? "";
@@ -77,8 +78,8 @@ function isForbiddenProjectPath(path) {
 		|| /(^|\/)\.platform-smoke-runs(?:\/|$)/.test(path);
 }
 
-function npmPackFiles() {
-	const output = silent("npm", ["pack", "--dry-run", "--json"]);
+export function npmPackFiles(run = silent) {
+	const output = run("npm", ["pack", "--dry-run", "--json"], { timeout: NPM_PACK_INSPECTION_TIMEOUT_MS });
 	if (!output) return null;
 	try {
 		const parsed = JSON.parse(output);
@@ -101,7 +102,7 @@ function checkForbiddenProjectFiles(failures) {
 
 	const packFiles = npmPackFiles();
 	if (!packFiles) {
-		fail("could not inspect npm pack contents", failures);
+		fail("could not inspect npm pack contents within 120s; run npm pack --dry-run --json", failures);
 		return;
 	}
 	const packedForbidden = packFiles.filter(isForbiddenProjectPath);

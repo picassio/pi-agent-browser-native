@@ -49,6 +49,30 @@ test("platform smoke scripts have working syntax and help", () => {
 	assert.match(help.stdout, /agent-browser/);
 });
 
+test("npm pack inspection has a dedicated timeout above the shared doctor boundary", () => {
+	const code = String.raw`
+import assert from "node:assert/strict";
+import { NPM_PACK_INSPECTION_TIMEOUT_MS, npmPackFiles } from "./scripts/platform-smoke/doctor.mjs";
+const calls = [];
+const files = npmPackFiles((command, args, options) => {
+  calls.push({ command, args, options });
+  return JSON.stringify([{ files: [{ path: "package.json" }] }]);
+});
+assert.deepEqual(files, ["package.json"]);
+assert.equal(calls[0].command, "npm");
+assert.deepEqual(calls[0].args, ["pack", "--dry-run", "--json"]);
+assert.equal(calls[0].options.timeout, NPM_PACK_INSPECTION_TIMEOUT_MS);
+assert.ok(NPM_PACK_INSPECTION_TIMEOUT_MS > 20_000);
+assert.equal(npmPackFiles(() => null), null);
+assert.equal(npmPackFiles(() => "not json"), null);
+`;
+	const result = run(process.execPath, ["--input-type=module", "-e", code]);
+	assert.equal(result.status, 0, result.stderr + result.stdout);
+
+	const doctorScript = readFileSync("scripts/platform-smoke/doctor.mjs", "utf8");
+	assert.match(doctorScript, /could not inspect npm pack contents within 120s; run npm pack --dry-run --json/);
+});
+
 test("platform smoke config and package scripts require macOS, Ubuntu, and native Windows", () => {
 	const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
 		files?: string[];
