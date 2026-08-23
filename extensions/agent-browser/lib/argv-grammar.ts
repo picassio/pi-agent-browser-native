@@ -98,6 +98,8 @@ export const GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES: ReadonlySet<string> = ne
 	"--ignore-https-errors",
 	"--json",
 	"--no-auto-dialog",
+	"--no-pin-tab",
+	"--pin-tab",
 	"--quiet",
 	"-q",
 	"--verbose",
