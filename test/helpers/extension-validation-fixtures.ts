@@ -14,6 +14,7 @@ import type { AgentBrowserToolParams, AgentBrowserToolRenderContext } from "./ag
 
 type RenderThemeColor = Parameters<Theme["fg"]>[0];
 type RenderThemeBg = Parameters<Theme["bg"]>[0];
+type RenderThemeBgColors = ConstructorParameters<typeof Theme>[1];
 
 const PLAIN_RENDER_FG_COLORS = {
 	accent: "#ffffff",
@@ -71,7 +72,7 @@ const PLAIN_RENDER_BG_COLORS = {
 	toolPendingBg: "#000000",
 	toolSuccessBg: "#000000",
 	userMessageBg: "#000000",
-} satisfies Record<RenderThemeBg, string>;
+} satisfies RenderThemeBgColors;
 
 class PlainRenderTheme extends Theme {
 	constructor() {
