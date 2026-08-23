@@ -26,9 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Install exact upstream engine
-        run: npm install --global agent-browser@0.33.0
+        run: npm install --global agent-browser@0.34.0
       - name: Verify exact engine
-        run: test "$(agent-browser --version)" = "agent-browser 0.33.0"
+        run: test "$(agent-browser --version)" = "agent-browser 0.34.0"
       - name: Default verification
         run: npm run verify
       - name: Packaged Pi verification
@@ -60,10 +60,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Install exact upstream engine
-        run: npm install --global agent-browser@0.33.0
+        run: npm install --global agent-browser@0.34.0
       - name: Verify exact engine
         shell: bash
-        run: test "$(agent-browser --version)" = "agent-browser 0.33.0"
+        run: test "$(agent-browser --version)" = "agent-browser 0.34.0"
       - name: Install upstream browser runtime
         run: agent-browser install
       - name: Platform-local package gate

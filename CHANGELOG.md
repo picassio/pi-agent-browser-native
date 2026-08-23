@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.75 - 2026-08-23
+
+### Changed
+
+- Rebaselined the Picassio fork to `agent-browser 0.34.0`, including sticky `--pin-tab` / `--no-pin-tab`, CDP target IDs, and explicit `tab_gone` recovery.
+- Updated hosted Ubuntu, macOS, and Windows verification to install and dogfood the exact 0.34.0 engine.
+
+### Fixed
+
+- Classify `tab_gone` before generic error categories and return bounded tab-list/new-tab recovery actions instead of risking actions on a neighboring tab.
+
+## 0.2.74 - 2026-08-23
+
+### Fixed
+
+- Corrected the extension-validation fixture type for the upstream `scrollbarThumb` role; the other QA-approved PAB review fixes were already patch-equivalent in 0.2.73.
+
 ## 0.2.73 - 2026-07-30
 
 ### Changed

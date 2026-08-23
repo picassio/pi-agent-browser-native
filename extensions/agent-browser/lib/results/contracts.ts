@@ -41,6 +41,7 @@ export type AgentBrowserFailureCategory =
 	| "selector-unsupported"
 	| "stale-ref"
 	| "tab-drift"
+	| "tab-gone"
 	| "timeout"
 	| "upstream-error"
 	| "validation-error";
