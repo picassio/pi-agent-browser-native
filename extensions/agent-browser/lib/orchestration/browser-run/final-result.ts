@@ -356,7 +356,13 @@ function buildDialogTimeoutNextActions(options: { command?: string; sessionName?
 }
 
 function buildResultNextActions(options: FinalResultInput): AgentBrowserNextAction[] | undefined {
-	const nextActionCollector = new AgentBrowserNextActionCollector(options.presentation.nextActions);
+	const presentationNextActions = options.categoryDetails.failureCategory === "confirmation-required"
+		? options.presentation.nextActions?.map((action) => {
+			if ((action.id !== "approve-confirmation" && action.id !== "deny-confirmation") || !action.params?.args) return action;
+			return { ...action, params: { ...action.params, args: withOptionalSessionArgs(options.executionPlan.sessionName, action.params.args) } };
+		})
+		: options.presentation.nextActions;
+	const nextActionCollector = new AgentBrowserNextActionCollector(presentationNextActions);
 	if (options.categoryDetails.resultCategory === "success" && options.executionPlan.commandInfo.command === "connect" && !options.electronLaunchRecord) nextActionCollector.appendUnique(buildConnectedSessionNextActions(options.executionPlan.sessionName));
 	if (options.noActivePageSnapshotFailure) nextActionCollector.appendUnique(buildNoActivePageNextActions(options.executionPlan.sessionName));
 	if (options.aboutBlankSessionMismatch) {

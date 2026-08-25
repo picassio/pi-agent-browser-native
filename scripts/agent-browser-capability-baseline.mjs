@@ -123,7 +123,7 @@ const helpCommands = Object.freeze([
   helpCommand("upgrade help", ["upgrade", "--help"]),
   helpCommand("profiles help", ["profiles", "--help"]),
   helpCommand("mcp help", ["mcp", "--help"]),
-  helpCommand("plugin help", ["plugin", "--help"]),
+  helpCommand("plugin --help output", ["plugin", "--help"]),
 ]);
 
 const inventorySections = Object.freeze([
@@ -595,8 +595,8 @@ const inventorySections = Object.freeze([
       ["auth help", "--credential-provider <p>"],
       ["mcp help", "agent_browser_open"],
       ["mcp help", "--tools"],
-      ["plugin help", "Add a plugin from npm or GitHub"],
-      ["plugin help", "credential.read"],
+      ["plugin --help output", "Add a plugin from npm or GitHub"],
+      ["plugin --help output", "credential.read"],
     ],
   ),
   section(

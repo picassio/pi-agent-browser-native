@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.76 - 2026-08-24
+
+### Fixed
+
+- Bind guarded-action `confirm <id>` and `deny <id>` recovery payloads to the exact managed session that owns the pending confirmation, including `sessionMode: "fresh"` calls.
+- Clarify that plugin help is invoked as `plugin --help`; `help` is not a plugin subcommand.
+
+### Validation
+
+- Added a process-separated regression proving the emitted confirmation next action resumes only through the owning session while preserving secret redaction.
+- Passed 601 repository tests with 2 opt-in skips, typechecking, generated-doc drift checks, and live 0.34.0 command-reference verification.
+
 ## 0.2.75 - 2026-08-23
 
 ### Changed
