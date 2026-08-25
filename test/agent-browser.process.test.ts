@@ -607,6 +607,41 @@ if (isNavigationSummaryHelper) {
 	}
 });
 
+test("runAgentBrowserProcess hardens persistent upstream socket metadata", { concurrency: false }, async () => {
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-socket-mode-"));
+	const socketDir = join(tempDir, "socket");
+	const basePath = process.env.PATH ?? "";
+	await writeFakeAgentBrowserBinary(
+		tempDir,
+		`const fs = require("node:fs");
+const path = require("node:path");
+const socketDir = process.env.AGENT_BROWSER_SOCKET_DIR;
+for (const suffix of [".config", ".target"]) {
+  const file = path.join(socketDir, "managed-session" + suffix);
+  fs.writeFileSync(file, "runtime metadata", { mode: 0o664 });
+  fs.chmodSync(file, 0o664);
+}
+process.stdout.write(JSON.stringify({ success: true, data: "ok" }));`,
+	);
+
+	try {
+		const result = await runAgentBrowserProcess({
+			args: ["--session", "managed-session", "session"],
+			cwd: tempDir,
+			env: {
+				AGENT_BROWSER_SOCKET_DIR: socketDir,
+				PATH: `${tempDir}${delimiter}${basePath}`,
+			},
+		});
+		assert.equal(result.exitCode, 0);
+		assert.equal((await stat(socketDir)).mode & 0o777, 0o700);
+		assert.equal((await stat(join(socketDir, "managed-session.config"))).mode & 0o777, 0o600);
+		assert.equal((await stat(join(socketDir, "managed-session.target"))).mode & 0o777, 0o600);
+	} finally {
+		await rm(tempDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+	}
+});
+
 test("runAgentBrowserProcess forwards the parent environment while preserving wrapper overrides", { concurrency: false }, async () => {
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-test-"));
 	const basePath = process.env.PATH ?? "";

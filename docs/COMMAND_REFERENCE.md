@@ -919,7 +919,7 @@ Browser default config is conservative: it adds agent guidance for signed-in/acc
 - `--max-output <chars>`: truncate page output to N characters. Environment: `AGENT_BROWSER_MAX_OUTPUT`.
 - `--allowed-domains <list>`: restrict browser and `read` traffic to exact or `*.` wildcard domain patterns. Environment: `AGENT_BROWSER_ALLOWED_DOMAINS`. Use a fresh local Chrome context; upstream 0.32.0 rejects containment-unsafe launch modes/state and disables Chromium `RTCPeerConnection` while active. The wrapper also remembers argv-supplied allowed domains for the managed session and fails a successful-looking browser command with `failureCategory: "policy-blocked"` when the final observed `http(s)` URL host is outside that allowlist, including click/navigation escapes after the initial page load.
 - `--action-policy <path>`: action policy JSON file. Environment: `AGENT_BROWSER_ACTION_POLICY`.
-- `--confirm-actions <list>`: action categories requiring confirmation. Environment: `AGENT_BROWSER_CONFIRM_ACTIONS`.
+- `--confirm-actions <list>`: policy action categories requiring confirmation. Environment: `AGENT_BROWSER_CONFIRM_ACTIONS`. Categories use daemon policy names, so the CLI `eval` command is gated with `evaluate` (for example `--confirm-actions evaluate`), not `eval`.
 - `--confirm-interactive`: interactive confirmations; auto-denies when stdin is not a TTY. Environment: `AGENT_BROWSER_CONFIRM_INTERACTIVE`.
 - `-p, --provider <name>`: provider such as `ios`, `browserbase`, `kernel`, `browseruse`, `browserless`, or `agentcore`. Environment: `AGENT_BROWSER_PROVIDER`.
 - `--device <name>`: iOS device name. Environment: `AGENT_BROWSER_IOS_DEVICE`.
@@ -943,6 +943,8 @@ Browser default config is conservative: it adds agent guidance for signed-in/acc
 Use `--config <path>` to load a specific config file. Boolean flags accept optional `true` or `false` values, such as `--headed false` or `--webgpu false`, to override config. Browser extensions from user and project configs are merged rather than replaced.
 
 Other useful environment variables include `AGENT_BROWSER_DEFAULT_TIMEOUT`, `AGENT_BROWSER_AUTOSAVE_INTERVAL_MS`, `AGENT_BROWSER_STREAM_PORT`, `AGENT_BROWSER_IDLE_TIMEOUT_MS`, `AGENT_BROWSER_ENCRYPTION_KEY`, `AGENT_BROWSER_STATE_EXPIRE_DAYS`, `AGENT_BROWSER_IOS_DEVICE`, `AGENT_BROWSER_IOS_UDID`, `AI_GATEWAY_URL`, `AI_GATEWAY_API_KEY`, provider credential names, and AWS credential names when using AgentCore. The upstream child receives the parent environment plus wrapper overrides such as the managed socket directory and clamped default operation timeout (`buildAgentBrowserProcessEnv` in `extensions/agent-browser/lib/process.ts`). Model-facing output still redacts recognized secret values.
+
+On local Unix, the wrapper's short runtime directory (normally `/tmp/piab-<uid>`) is owner-only (`0700`). Upstream keeps session-named `.config` and `.target` metadata there while daemon sessions are live; this is expected runtime state, not a saved browser artifact or credential store. The wrapper re-hardens the addressed session's regular files to `0600` after each session-bound call using no-follow file handles. Security checks should enforce owner-only modes and bounded session cleanup rather than requiring zero runtime pathnames while a managed session is active.
 
 ## Wrapper-specific behavior worth knowing
 

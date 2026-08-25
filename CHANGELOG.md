@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.77 - 2026-08-25
+
+### Fixed
+
+- Re-harden upstream-managed Unix socket metadata (`.config` and `.target`) to owner-only `0600` after each session-bound wrapper call; the containing runtime directory remains `0700`.
+- Document persistent live-daemon metadata as expected runtime state and clarify that the CLI `eval` command uses the `evaluate` confirmation-policy category.
+
+### Validation
+
+- Added process-level coverage that deliberately creates group-readable upstream metadata and proves the session-bound wrapper returns it to `0600`; hardening uses bounded no-follow file handles.
+- Passed 602 repository tests with 2 opt-in skips, typechecking, live engine 0.34.0 command-reference verification, generated-doc checks, and package verification.
+
 ## 0.2.76 - 2026-08-24
 
 ### Fixed
