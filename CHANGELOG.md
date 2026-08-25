@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.78 - 2026-08-25
+
+### Fixed
+
+- Preserve an explicit `--confirm-actions <list>` alongside the owning `--session <name>` in confirm/deny recovery actions. Upstream 0.34.0 treats the confirmation list as daemon configuration; omitting it restarted the daemon and erased the pending confirmation before recovery.
+
+### Validation
+
+- Extended the process-separated confirmation regression so recovery fails unless both the session and confirmation-policy configuration are preserved.
+- Passed 602 repository tests with 2 opt-in skips, typechecking, live engine 0.34.0 command-reference verification, generated-doc checks, and package verification.
+
 ## 0.2.77 - 2026-08-25
 
 ### Fixed

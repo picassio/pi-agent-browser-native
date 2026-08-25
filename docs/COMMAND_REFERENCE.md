@@ -518,7 +518,7 @@ Use `tab list` and `tab <tab-id-or-label>` when a profile restore, pop-up, or cl
 
 ### Recover from guarded-action confirmations
 
-When a call uses `--confirm-actions` and upstream requires confirmation, the native tool result prints the pending confirmation id and both recovery calls. Use the same `agent_browser` tool; do not switch to bash. Prefer `details.nextActions`: managed-session recovery payloads include the exact `--session <name>` that owns the pending confirmation, including after a `sessionMode: "fresh"` call.
+When a call uses `--confirm-actions` and upstream requires confirmation, the native tool result prints the pending confirmation id and both recovery calls. Use the same `agent_browser` tool; do not switch to bash. Prefer `details.nextActions`: managed-session recovery payloads include the exact `--session <name>` that owns the pending confirmation and preserve an explicit `--confirm-actions <list>` so upstream does not restart with a different daemon configuration, including after a `sessionMode: "fresh"` call.
 
 ```json
 { "args": ["--confirm-actions", "click", "click", "@danger"] }

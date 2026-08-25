@@ -355,11 +355,21 @@ function buildDialogTimeoutNextActions(options: { command?: string; sessionName?
 	];
 }
 
+function withConfirmationPolicyArgs(sourceArgs: readonly string[], recoveryArgs: string[]): string[] {
+	for (let index = 0; index < sourceArgs.length; index += 1) {
+		const token = sourceArgs[index];
+		if (token === "--confirm-actions" && sourceArgs[index + 1]) return [token, sourceArgs[index + 1], ...recoveryArgs];
+		if (token.startsWith("--confirm-actions=")) return [token, ...recoveryArgs];
+	}
+	return recoveryArgs;
+}
+
 function buildResultNextActions(options: FinalResultInput): AgentBrowserNextAction[] | undefined {
 	const presentationNextActions = options.categoryDetails.failureCategory === "confirmation-required"
 		? options.presentation.nextActions?.map((action) => {
 			if ((action.id !== "approve-confirmation" && action.id !== "deny-confirmation") || !action.params?.args) return action;
-			return { ...action, params: { ...action.params, args: withOptionalSessionArgs(options.executionPlan.sessionName, action.params.args) } };
+			const policyBoundArgs = withConfirmationPolicyArgs(options.redactedArgs, action.params.args);
+			return { ...action, params: { ...action.params, args: withOptionalSessionArgs(options.executionPlan.sessionName, policyBoundArgs) } };
 		})
 		: options.presentation.nextActions;
 	const nextActionCollector = new AgentBrowserNextActionCollector(presentationNextActions);

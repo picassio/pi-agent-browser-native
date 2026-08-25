@@ -234,12 +234,14 @@ test("agentBrowserExtension renders confirmation recovery and redacts sensitive 
 const args = process.argv.slice(2);
 const sessionIndex = args.indexOf("--session");
 const session = sessionIndex >= 0 ? args[sessionIndex + 1] : "";
+const confirmActionsIndex = args.indexOf("--confirm-actions");
+const confirmActions = confirmActionsIndex >= 0 ? args[confirmActionsIndex + 1] : "";
 if (args.includes("confirm")) {
-  const pendingSession = fs.existsSync(${JSON.stringify(pendingPath)}) ? fs.readFileSync(${JSON.stringify(pendingPath)}, "utf8") : "";
-  if (session && session === pendingSession) process.stdout.write(JSON.stringify({ success: true, data: "Action confirmed" }));
+  const pending = fs.existsSync(${JSON.stringify(pendingPath)}) ? JSON.parse(fs.readFileSync(${JSON.stringify(pendingPath)}, "utf8")) : {};
+  if (session && session === pending.session && confirmActions === pending.confirmActions) process.stdout.write(JSON.stringify({ success: true, data: "Action confirmed" }));
   else { process.stdout.write(JSON.stringify({ success: false, error: "No pending confirmation" })); process.exitCode = 1; }
 } else {
-  fs.writeFileSync(${JSON.stringify(pendingPath)}, session);
+  fs.writeFileSync(${JSON.stringify(pendingPath)}, JSON.stringify({ confirmActions, session }));
   process.stdout.write(JSON.stringify({ success: false, data: { confirmation_required: true, confirmation_id: "c_sensitive", action: "POST https://user:pass@example.com/delete?token=secret Authorization: Bearer raw-token" } }));
   process.exitCode = 1;
 }`,
@@ -270,8 +272,8 @@ if (args.includes("confirm")) {
 			const sessionName = String(result.details?.sessionName ?? "");
 			assert.ok(sessionName);
 			assert.deepEqual(confirmationActions?.map((action) => action.params?.args), [
-				["--session", sessionName, "confirm", "c_sensitive"],
-				["--session", sessionName, "deny", "c_sensitive"],
+				["--session", sessionName, "--confirm-actions", "click", "confirm", "c_sensitive"],
+				["--session", sessionName, "--confirm-actions", "click", "deny", "c_sensitive"],
 			]);
 			const confirmed = await executeRegisteredTool(harness.tool, harness.ctx, confirmationActions?.[0]?.params);
 			assert.equal(confirmed.isError, false);
