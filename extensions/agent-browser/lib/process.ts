@@ -7,7 +7,9 @@
  */
 
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { chmod, mkdir } from "node:fs/promises";
+import { constants } from "node:fs";
+import { chmod, mkdir, open } from "node:fs/promises";
+import { join } from "node:path";
 import { env as processEnv, platform as processPlatform } from "node:process";
 
 import { GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES, GLOBAL_VALUE_FLAGS, getFlagName } from "./argv-grammar.js";
@@ -217,6 +219,32 @@ async function ensureAgentBrowserSocketDir(socketDir: string): Promise<boolean> 
 	}
 }
 
+function getSessionMetadataNames(args: readonly string[]): string[] {
+	let sessionName: string | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const token = args[index];
+		if (token === "--session") sessionName = args[index + 1];
+		else if (token.startsWith("--session=")) sessionName = token.slice("--session=".length);
+	}
+	if (!sessionName || sessionName === "." || sessionName === ".." || !/^[A-Za-z0-9._-]+$/.test(sessionName)) return [];
+	return [`${sessionName}.config`, `${sessionName}.target`];
+}
+
+async function hardenAgentBrowserSocketMetadata(socketDir: string, args: readonly string[]): Promise<void> {
+	if (processPlatform === "win32") return;
+	await Promise.all(getSessionMetadataNames(args).map(async (entry) => {
+		let handle: Awaited<ReturnType<typeof open>> | undefined;
+		try {
+			handle = await open(join(socketDir, entry), constants.O_RDONLY | constants.O_NOFOLLOW);
+			if ((await handle.stat()).isFile()) await handle.chmod(0o600);
+		} catch {
+			// Upstream may rotate daemon metadata concurrently; hardening is best-effort.
+		} finally {
+			await handle?.close().catch(() => undefined);
+		}
+	}));
+}
+
 export function buildAgentBrowserProcessEnv(
 	baseEnv: NodeJS.ProcessEnv = processEnv,
 	overrides: NodeJS.ProcessEnv | undefined = undefined,
@@ -254,8 +282,9 @@ export async function runAgentBrowserProcess(options: {
 	const explicitSocketDir = processOverrides[AGENT_BROWSER_SOCKET_DIR_ENV];
 	let effectiveEnv = explicitSocketDir === undefined ? { ...processOverrides, [AGENT_BROWSER_SOCKET_DIR_ENV]: undefined } : processOverrides;
 	const requestedSocketDir = explicitSocketDir ?? getAgentBrowserSocketDir();
-	if (requestedSocketDir && (await ensureAgentBrowserSocketDir(requestedSocketDir))) {
-		effectiveEnv = { ...effectiveEnv, [AGENT_BROWSER_SOCKET_DIR_ENV]: requestedSocketDir };
+	const activeSocketDir = requestedSocketDir && (await ensureAgentBrowserSocketDir(requestedSocketDir)) ? requestedSocketDir : undefined;
+	if (activeSocketDir) {
+		effectiveEnv = { ...effectiveEnv, [AGENT_BROWSER_SOCKET_DIR_ENV]: activeSocketDir };
 	}
 
 	return await new Promise<ProcessRunResult>((resolve) => {
@@ -332,6 +361,7 @@ export async function runAgentBrowserProcess(options: {
 				if (stdoutSpillHandle) {
 					await stdoutSpillHandle.close().catch(() => undefined);
 				}
+				if (activeSocketDir) await hardenAgentBrowserSocketMetadata(activeSocketDir, args);
 				if (!spawnError && stdoutSpillError) {
 					spawnError = stdoutSpillError;
 				}
