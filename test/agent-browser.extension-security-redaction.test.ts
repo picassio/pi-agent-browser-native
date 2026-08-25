@@ -226,11 +226,23 @@ process.stdout.write("invalid-json " + stdin + " " + "x".repeat(600000));`,
 
 test("agentBrowserExtension renders confirmation recovery and redacts sensitive confirmation context", { concurrency: false }, async () => {
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-confirm-"));
+	const pendingPath = join(tempDir, "pending-session");
 	const basePath = process.env.PATH ?? "";
 	await writeFakeAgentBrowserBinary(
 		tempDir,
-		`process.stdout.write(JSON.stringify({ success: false, data: { confirmation_required: true, confirmation_id: "c_sensitive", action: "POST https://user:pass@example.com/delete?token=secret Authorization: Bearer raw-token" } }));
-process.exit(1);`,
+		`const fs = require("node:fs");
+const args = process.argv.slice(2);
+const sessionIndex = args.indexOf("--session");
+const session = sessionIndex >= 0 ? args[sessionIndex + 1] : "";
+if (args.includes("confirm")) {
+  const pendingSession = fs.existsSync(${JSON.stringify(pendingPath)}) ? fs.readFileSync(${JSON.stringify(pendingPath)}, "utf8") : "";
+  if (session && session === pendingSession) process.stdout.write(JSON.stringify({ success: true, data: "Action confirmed" }));
+  else { process.stdout.write(JSON.stringify({ success: false, error: "No pending confirmation" })); process.exitCode = 1; }
+} else {
+  fs.writeFileSync(${JSON.stringify(pendingPath)}, session);
+  process.stdout.write(JSON.stringify({ success: false, data: { confirmation_required: true, confirmation_id: "c_sensitive", action: "POST https://user:pass@example.com/delete?token=secret Authorization: Bearer raw-token" } }));
+  process.exitCode = 1;
+}`,
 	);
 
 	try {
@@ -240,6 +252,7 @@ process.exit(1);`,
 
 			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["--confirm-actions", "click", "click", "@danger"],
+				sessionMode: "fresh",
 			});
 
 			assert.equal(result.isError, true);
@@ -252,8 +265,17 @@ process.exit(1);`,
 			assert.match(String(result.details?.summary ?? ""), /Confirmation required: c_sensitive/);
 			assert.equal(result.details?.resultCategory, "failure");
 			assert.equal(result.details?.failureCategory, "confirmation-required");
-			const nextActions = result.details?.nextActions as Array<{ params?: { args: string[] } }> | undefined;
-			assert.deepEqual(nextActions?.map((action) => action.params?.args), [["confirm", "c_sensitive"], ["deny", "c_sensitive"]]);
+			const nextActions = result.details?.nextActions as Array<{ id: string; params?: { args: string[] } }> | undefined;
+			const confirmationActions = nextActions?.filter((action) => action.id === "approve-confirmation" || action.id === "deny-confirmation");
+			const sessionName = String(result.details?.sessionName ?? "");
+			assert.ok(sessionName);
+			assert.deepEqual(confirmationActions?.map((action) => action.params?.args), [
+				["--session", sessionName, "confirm", "c_sensitive"],
+				["--session", sessionName, "deny", "c_sensitive"],
+			]);
+			const confirmed = await executeRegisteredTool(harness.tool, harness.ctx, confirmationActions?.[0]?.params);
+			assert.equal(confirmed.isError, false);
+			assert.match((confirmed.content[0] as { text: string }).text, /Action confirmed/);
 			assert.doesNotMatch(JSON.stringify(result.content), /user:pass|raw-token|token=secret/);
 			assert.doesNotMatch(JSON.stringify(result.details), /user:pass|raw-token|token=secret/);
 		});

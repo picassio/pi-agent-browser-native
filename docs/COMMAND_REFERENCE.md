@@ -518,7 +518,7 @@ Use `tab list` and `tab <tab-id-or-label>` when a profile restore, pop-up, or cl
 
 ### Recover from guarded-action confirmations
 
-When a call uses `--confirm-actions` and upstream requires confirmation, the native tool result prints the pending confirmation id and both recovery calls. Use the same `agent_browser` tool; do not switch to bash.
+When a call uses `--confirm-actions` and upstream requires confirmation, the native tool result prints the pending confirmation id and both recovery calls. Use the same `agent_browser` tool; do not switch to bash. Prefer `details.nextActions`: managed-session recovery payloads include the exact `--session <name>` that owns the pending confirmation, including after a `sessionMode: "fresh"` call.
 
 ```json
 { "args": ["--confirm-actions", "click", "click", "@danger"] }
@@ -795,6 +795,7 @@ Long-running or lifecycle commands should be explicitly paired with cleanup call
 | `plugin [list]` | List configured plugins (default subcommand); `{ "plugins": [...] }` is a successful sessionless result. |
 | `plugin show <name>` | Show one configured plugin; `{ "plugin": {...} }` is a successful sessionless result. |
 | `plugin run <name> <type>` | Run a `command.run` or custom plugin request over the agent-browser plugin stdio protocol. |
+| `plugin --help` | Show plugin help. `help` is not a plugin subcommand; the supported subcommands are `add`, `list`, `show`, and `run`. |
 | `auth login <name> --credential-provider <plugin>` | Resolve credentials just-in-time from a configured credential plugin (e.g. a vault) instead of saved passwords; pair with `--item <ref>` and optional selector overrides. Credentials are not stored locally. |
 | `mcp --help` | Show MCP server help through the native tool. |
 | `mcp` | Start a local MCP stdio server for external MCP clients; bare native-tool calls are rejected before spawn. |
@@ -1066,7 +1067,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - upgrade help: `agent-browser upgrade --help`
 - profiles help: `agent-browser profiles --help`
 - mcp help: `agent-browser mcp --help`
-- plugin help: `agent-browser plugin --help`
+- plugin --help output: `agent-browser plugin --help`
 
 #### Inventory sections
 - Built-in skills: 16 human-doc token(s), 18 upstream token(s)
@@ -1670,8 +1671,8 @@ This generated block is review data for maintainers. The human-authored referenc
 - auth help: `--credential-provider <p>`
 - mcp help: `agent_browser_open`
 - mcp help: `--tools`
-- plugin help: `Add a plugin from npm or GitHub`
-- plugin help: `credential.read`
+- plugin --help output: `Add a plugin from npm or GitHub`
+- plugin --help output: `credential.read`
 
 ##### Global flags, config, providers, policy, and environment
 - root help: `--profile <name|path>`
