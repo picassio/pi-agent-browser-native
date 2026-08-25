@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.79 - 2026-08-25
+
+### Fixed
+
+- Treat upstream 0.34.0's successful `confirmation_required` envelope as an actionable `confirmation-required` tool result so exact confirm/deny next actions are emitted.
+- Skip wrapper post-command browser diagnostics while a confirmation is pending; helper calls with a different daemon configuration could otherwise erase upstream pending state before the user responds.
+
+### Validation
+
+- Updated the process-separated regression to mirror upstream's successful pending envelope and to fail if hidden post-command helpers replace its state.
+- Passed 602 repository tests with 2 opt-in skips, typechecking, live engine 0.34.0 command-reference verification, generated-doc checks, and package verification.
+
 ## 0.2.78 - 2026-08-25
 
 ### Fixed
