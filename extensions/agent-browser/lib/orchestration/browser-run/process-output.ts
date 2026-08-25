@@ -27,6 +27,7 @@ import {
 	formatSessionArtifactRetentionSummary,
 	mergeSessionArtifactManifest,
 } from "../../results/artifact-manifest.js";
+import { detectConfirmationRequired } from "../../results/confirmation.js";
 import type { NetworkRouteRecord, SessionArtifactManifest } from "../../results/contracts.js";
 import { getClipboardWritePayloadCandidates, redactClipboardPermissionEcho, redactClipboardPermissionErrorValue } from "../../results/presentation/errors.js";
 import { shouldCaptureSemanticActionNavigationSummary } from "../../results/presentation/semantic-action.js";
@@ -263,15 +264,18 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 		}
 		const envelopeSuccess = plainTextInspection ? true : presentationEnvelope?.success !== false;
 		let succeeded = processSucceeded && parseSucceeded && envelopeSuccess;
+		const confirmationRequired = detectConfirmationRequired(presentationEnvelope?.data) !== undefined;
+		let shouldRunPostCommandDiagnostics = succeeded && !confirmationRequired;
 		const inspectionText = plainTextInspection ? processResult.stdout.trim() : undefined;
 		const sessionStateKey = getSessionContextKey(prepared.executionPlan.sessionName, prepared.executionPlan.namespace);
 		updateTraceOwnerState({ command: prepared.executionPlan.commandInfo.command, sessionName: sessionStateKey, subcommand: prepared.executionPlan.commandInfo.subcommand, succeeded, traceOwners });
 
 		let clickDispatchDiagnostic: Awaited<ReturnType<typeof collectClickDispatchDiagnostic>>;
-		if (succeeded && prepared.clickDispatchProbe) {
+		if (shouldRunPostCommandDiagnostics && prepared.clickDispatchProbe) {
 			clickDispatchDiagnostic = await collectClickDispatchDiagnostic({ cwd, namespace: prepared.executionPlan.namespace, probe: prepared.clickDispatchProbe, sessionName: prepared.executionPlan.sessionName, signal });
 			if (clickDispatchDiagnostic) {
 				succeeded = false;
+				shouldRunPostCommandDiagnostics = false;
 				presentationEnvelope = { ...(presentationEnvelope ?? {}), error: clickDispatchDiagnostic.summary, success: false };
 			}
 		}
@@ -285,7 +289,7 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 			: parsedAllowedDomainsPolicy;
 		const shouldCaptureAllowedDomainNavigationSummary = sessionAllowedDomainsPolicy !== undefined && !cssClickWithoutHref && (prepared.executionPlan.commandInfo.command === "batch" || isNavigationObservableCommandName(prepared.executionPlan.commandInfo.command));
 		if (
-			succeeded &&
+			shouldRunPostCommandDiagnostics &&
 			!navigationSummary &&
 			(shouldCaptureNavigationSummary(prepared.executionPlan.commandInfo.command, presentationEnvelope?.data) ||
 				shouldCaptureSemanticActionNavigationSummary(prepared.compiledSemanticAction, presentationEnvelope?.data) ||
@@ -298,7 +302,7 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 		let overlayBlockerDiagnostic: Awaited<ReturnType<typeof collectOverlayBlockerDiagnostic>>;
 
 		let openResultTabCorrection: Awaited<ReturnType<typeof collectOpenResultTabCorrection>>;
-		if (succeeded && prepared.executionPlan.sessionName && prepared.executionPlan.startupScopedFlags.some((flag) => OPEN_RESULT_TAB_CORRECTION_FLAGS.has(flag)) && isOpenNavigationCommand(prepared.executionPlan.commandInfo.command) && !commandExplicitlyTargetsAboutBlank(prepared.commandTokens)) {
+		if (shouldRunPostCommandDiagnostics && prepared.executionPlan.sessionName && prepared.executionPlan.startupScopedFlags.some((flag) => OPEN_RESULT_TAB_CORRECTION_FLAGS.has(flag)) && isOpenNavigationCommand(prepared.executionPlan.commandInfo.command) && !commandExplicitlyTargetsAboutBlank(prepared.commandTokens)) {
 			const targetTitle = extractStringResultField(presentationEnvelope?.data, "title");
 			const targetUrl = extractStringResultField(presentationEnvelope?.data, "url");
 			const plannedTabCorrection = await collectOpenResultTabCorrection({ cwd, namespace: prepared.executionPlan.namespace, sessionName: prepared.executionPlan.sessionName, signal, targetTitle, targetUrl });
@@ -312,7 +316,7 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 		let electronRefFreshnessDiagnostic: ReturnType<typeof buildElectronRefFreshnessDiagnostic>;
 		let electronSessionMismatch: ReturnType<typeof buildElectronSessionMismatch>;
 		let electronStatusAfterCommand: Awaited<ReturnType<typeof inspectElectronLaunchStatus>> | undefined;
-		const shouldTreatAboutBlankAsMismatch = succeeded && prepared.priorSessionTabTarget !== undefined && !isAboutBlankSessionTabTarget(prepared.priorSessionTabTarget) && isAboutBlankSessionTabTarget(observedSessionTabTarget ?? currentSessionTabTarget) && !commandExplicitlyTargetsAboutBlank(prepared.commandTokens);
+		const shouldTreatAboutBlankAsMismatch = shouldRunPostCommandDiagnostics && prepared.priorSessionTabTarget !== undefined && !isAboutBlankSessionTabTarget(prepared.priorSessionTabTarget) && isAboutBlankSessionTabTarget(observedSessionTabTarget ?? currentSessionTabTarget) && !commandExplicitlyTargetsAboutBlank(prepared.commandTokens);
 		let sessionTabCorrection = prepared.sessionTabCorrection;
 		if (shouldTreatAboutBlankAsMismatch && prepared.priorSessionTabTarget) {
 			const aboutBlankObservedTarget = observedSessionTabTarget ?? currentSessionTabTarget;
@@ -327,7 +331,7 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 				electronSessionMismatch = buildElectronSessionMismatch({ managedSession: { sessionName: prepared.executionPlan.sessionName, title: aboutBlankObservedTarget?.title, url: aboutBlankObservedTarget?.url ?? "about:blank" }, record: electronRecord, statusTargets: electronStatusAfterCommand.targets });
 			}
 		}
-		if (succeeded && prepared.priorSessionTabTarget && !sessionTabCorrection && !aboutBlankSessionMismatch && !commandExplicitlyTargetsAboutBlank(prepared.commandTokens) && observedSessionTabTarget && shouldCorrectSessionTabAfterCommand({ command: prepared.executionPlan.commandInfo.command, pinningRequired: prepared.sessionTabPinningReason !== undefined, sessionName: prepared.executionPlan.sessionName })) {
+		if (shouldRunPostCommandDiagnostics && prepared.priorSessionTabTarget && !sessionTabCorrection && !aboutBlankSessionMismatch && !commandExplicitlyTargetsAboutBlank(prepared.commandTokens) && observedSessionTabTarget && shouldCorrectSessionTabAfterCommand({ command: prepared.executionPlan.commandInfo.command, pinningRequired: prepared.sessionTabPinningReason !== undefined, sessionName: prepared.executionPlan.sessionName })) {
 			const postCommandTabCorrection = await collectSessionTabSelection({ cwd, namespace: prepared.executionPlan.namespace, sessionName: prepared.executionPlan.sessionName, signal, target: observedSessionTabTarget });
 			if (postCommandTabCorrection) {
 				const appliedPostCommandCorrection = await applyOpenResultTabCorrection({ correction: postCommandTabCorrection, cwd, namespace: prepared.executionPlan.namespace, sessionName: prepared.executionPlan.sessionName, signal });
@@ -344,11 +348,12 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 		}) : undefined;
 		if (allowedDomainsViolation) {
 			succeeded = false;
+			shouldRunPostCommandDiagnostics = false;
 			presentationEnvelope = { ...(presentationEnvelope ?? {}), error: allowedDomainsViolation.summary, success: false };
 		}
 
 		const electronRecordForCommand = findElectronLaunchRecordForSession(prepared.executionPlan.sessionName, electronLaunchRecords);
-		if (succeeded && electronRecordForCommand && shouldInspectElectronPostCommandHealth(prepared.executionPlan.commandInfo.command)) {
+		if (shouldRunPostCommandDiagnostics && electronRecordForCommand && shouldInspectElectronPostCommandHealth(prepared.executionPlan.commandInfo.command)) {
 			electronStatusAfterCommand ??= await inspectElectronLaunchStatus(electronRecordForCommand);
 			electronPostCommandHealth = buildElectronPostCommandHealthDiagnostic({ command: prepared.executionPlan.commandInfo.command, record: electronRecordForCommand, status: electronStatusAfterCommand, target: observedSessionTabTarget ?? currentSessionTabTarget });
 			if (electronPostCommandHealth && electronPostCommandHealth.reason !== "process-dead") {
@@ -356,13 +361,16 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 				electronStatusAfterCommand = await inspectElectronLaunchStatus(electronRecordForCommand);
 				electronPostCommandHealth = buildElectronPostCommandHealthDiagnostic({ command: prepared.executionPlan.commandInfo.command, record: electronRecordForCommand, status: electronStatusAfterCommand, target: observedSessionTabTarget ?? currentSessionTabTarget });
 			}
-			if (electronPostCommandHealth) succeeded = false;
+			if (electronPostCommandHealth) {
+				succeeded = false;
+				shouldRunPostCommandDiagnostics = false;
+			}
 		}
 		let fillVerificationDiagnostic: Awaited<ReturnType<typeof collectFillVerificationDiagnostic>>;
 		let selectorTextVisibilityDiagnostics: Awaited<ReturnType<typeof collectSelectorTextVisibilityDiagnostics>> = [];
 		let electronBroadGetTextScopeDiagnostics: ReturnType<typeof collectElectronBroadGetTextScopeDiagnostics> = [];
 		const timeoutPartialProgress = processResult.timedOut ? await collectTimeoutPartialProgress({ command: prepared.executionPlan.commandInfo.command, compiledJob: prepared.compiledJob, cwd, namespace: prepared.executionPlan.namespace, sessionName: prepared.executionPlan.sessionName, stdin: prepared.runtimeToolStdin }) : undefined;
-		if (succeeded) {
+		if (shouldRunPostCommandDiagnostics) {
 			const fillRefSnapshot = prepared.resolvedSemanticActionRefSnapshot ?? prepared.priorRefSnapshotState;
 			fillVerificationDiagnostic = await collectFillVerificationDiagnostic({ commandTokens: prepared.commandTokens, cwd, forceValueVerification: electronRecordForCommand !== undefined, namespace: prepared.executionPlan.namespace, refSnapshot: fillRefSnapshot, sessionName: prepared.executionPlan.sessionName, signal });
 		}
@@ -372,8 +380,8 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 		if (succeeded && prepared.executionPlan.commandInfo.command === "snapshot") {
 			overlayBlockerDiagnostic = collectSnapshotOverlayBlockerDiagnostic(presentationEnvelope?.data);
 		}
-		if (succeeded && !overlayBlockerDiagnostic && !sessionTabCorrection && !aboutBlankSessionMismatch && !electronRecordForCommand && !clickDispatchDiagnostic) overlayBlockerDiagnostic = await collectOverlayBlockerDiagnostic({ command: prepared.executionPlan.commandInfo.command, cwd, data: presentationEnvelope?.data, namespace: prepared.executionPlan.namespace, navigationSummary, priorTarget: prepared.priorSessionTabTarget, sessionName: prepared.executionPlan.sessionName, signal });
-		if (succeeded) {
+		if (shouldRunPostCommandDiagnostics && !overlayBlockerDiagnostic && !sessionTabCorrection && !aboutBlankSessionMismatch && !electronRecordForCommand && !clickDispatchDiagnostic) overlayBlockerDiagnostic = await collectOverlayBlockerDiagnostic({ command: prepared.executionPlan.commandInfo.command, cwd, data: presentationEnvelope?.data, namespace: prepared.executionPlan.namespace, navigationSummary, priorTarget: prepared.priorSessionTabTarget, sessionName: prepared.executionPlan.sessionName, signal });
+		if (shouldRunPostCommandDiagnostics) {
 			selectorTextVisibilityDiagnostics = await collectSelectorTextVisibilityDiagnostics({ commandInfo: prepared.executionPlan.commandInfo, commandTokens: prepared.commandTokens, cwd, data: presentationEnvelope?.data, namespace: prepared.executionPlan.namespace, sessionName: prepared.executionPlan.sessionName, signal });
 			if (electronRecordForCommand) electronBroadGetTextScopeDiagnostics = collectElectronBroadGetTextScopeDiagnostics({ commandInfo: prepared.executionPlan.commandInfo, commandTokens: prepared.commandTokens, currentTarget: currentSessionTabTarget, data: presentationEnvelope?.data, electronLaunchRecords, priorTarget: prepared.priorSessionTabTarget, sessionName: prepared.executionPlan.sessionName });
 		}
@@ -382,9 +390,9 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 			? buildNetworkRouteDiagnostics(presentationEnvelope?.data, activeNetworkRoutes)
 			: undefined;
 		networkRoutesBySession = applyNetworkRouteState({ commandTokens: prepared.commandTokens, routesBySession: networkRoutesBySession, sessionName: sessionStateKey, succeeded });
-		const comboboxFocusDiagnostic = succeeded ? await collectComboboxFocusDiagnostic({ command: prepared.executionPlan.commandInfo.command, commandTokens: prepared.commandTokens, cwd, namespace: prepared.executionPlan.namespace, semanticAction: prepared.compiledSemanticAction, sessionName: prepared.executionPlan.sessionName, signal }) : undefined;
+		const comboboxFocusDiagnostic = shouldRunPostCommandDiagnostics ? await collectComboboxFocusDiagnostic({ command: prepared.executionPlan.commandInfo.command, commandTokens: prepared.commandTokens, cwd, namespace: prepared.executionPlan.namespace, semanticAction: prepared.compiledSemanticAction, sessionName: prepared.executionPlan.sessionName, signal }) : undefined;
 		const recordingDependencyWarning = await collectRecordingDependencyWarning({ command: prepared.executionPlan.commandInfo.command, commandTokens: prepared.commandTokens, succeeded });
-		const scrollNoopDiagnostic = succeeded && prepared.shouldProbeScrollNoop ? buildScrollNoopDiagnostic(prepared.scrollPositionBefore, await collectScrollPositionSnapshot({ cwd, namespace: prepared.executionPlan.namespace, sessionName: prepared.executionPlan.sessionName, signal })) : undefined;
+		const scrollNoopDiagnostic = shouldRunPostCommandDiagnostics && prepared.shouldProbeScrollNoop ? buildScrollNoopDiagnostic(prepared.scrollPositionBefore, await collectScrollPositionSnapshot({ cwd, namespace: prepared.executionPlan.namespace, sessionName: prepared.executionPlan.sessionName, signal })) : undefined;
 		let currentRefSnapshot: SessionRefSnapshot | undefined;
 		let currentRefSnapshotInvalidation: SessionRefSnapshotInvalidation | undefined;
 		const batchRefSnapshotState = prepared.executionPlan.commandInfo.command === "batch" ? extractLatestRefSnapshotStateFromBatchResults(presentationEnvelope?.data) : undefined;

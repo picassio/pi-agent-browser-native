@@ -116,6 +116,12 @@ export function buildAgentBrowserResultCategoryDetails(options: {
 	timedOut?: boolean;
 	validationError?: string;
 }): AgentBrowserResultCategoryDetails {
+	if (options.confirmationRequired) {
+		return {
+			failureCategory: "confirmation-required",
+			resultCategory: "failure",
+		};
+	}
 	if (options.succeeded) {
 		return {
 			resultCategory: "success",

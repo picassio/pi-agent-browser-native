@@ -235,15 +235,17 @@ const args = process.argv.slice(2);
 const sessionIndex = args.indexOf("--session");
 const session = sessionIndex >= 0 ? args[sessionIndex + 1] : "";
 const confirmActionsIndex = args.indexOf("--confirm-actions");
-const confirmActions = confirmActionsIndex >= 0 ? args[confirmActionsIndex + 1] : "";
+const confirmActionsEquals = args.find((arg) => arg.startsWith("--confirm-actions="));
+const confirmActions = confirmActionsIndex >= 0 ? args[confirmActionsIndex + 1] : confirmActionsEquals?.slice("--confirm-actions=".length) ?? "";
 if (args.includes("confirm")) {
   const pending = fs.existsSync(${JSON.stringify(pendingPath)}) ? JSON.parse(fs.readFileSync(${JSON.stringify(pendingPath)}, "utf8")) : {};
   if (session && session === pending.session && confirmActions === pending.confirmActions) process.stdout.write(JSON.stringify({ success: true, data: "Action confirmed" }));
   else { process.stdout.write(JSON.stringify({ success: false, error: "No pending confirmation" })); process.exitCode = 1; }
+} else if (confirmActions) {
+  fs.writeFileSync(${JSON.stringify(pendingPath)}, JSON.stringify({ args, confirmActions, session }));
+  process.stdout.write(JSON.stringify({ success: true, data: { confirmation_required: true, confirmation_id: "c_sensitive", action: "POST https://user:pass@example.com/delete?token=secret Authorization: Bearer raw-token" } }));
 } else {
-  fs.writeFileSync(${JSON.stringify(pendingPath)}, JSON.stringify({ confirmActions, session }));
-  process.stdout.write(JSON.stringify({ success: false, data: { confirmation_required: true, confirmation_id: "c_sensitive", action: "POST https://user:pass@example.com/delete?token=secret Authorization: Bearer raw-token" } }));
-  process.exitCode = 1;
+  process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
 	);
 
@@ -276,7 +278,7 @@ if (args.includes("confirm")) {
 				["--session", sessionName, "--confirm-actions", "click", "deny", "c_sensitive"],
 			]);
 			const confirmed = await executeRegisteredTool(harness.tool, harness.ctx, confirmationActions?.[0]?.params);
-			assert.equal(confirmed.isError, false);
+			assert.equal(confirmed.isError, false, JSON.stringify(confirmed));
 			assert.match((confirmed.content[0] as { text: string }).text, /Action confirmed/);
 			assert.doesNotMatch(JSON.stringify(result.content), /user:pass|raw-token|token=secret/);
 			assert.doesNotMatch(JSON.stringify(result.details), /user:pass|raw-token|token=secret/);

@@ -201,6 +201,10 @@ test("classifyAgentBrowserFailureCategory locks common machine-readable failure 
 	assert.equal(classifyAgentBrowserFailureCategory({ timedOut: true }), "timeout");
 	assert.equal(classifyAgentBrowserFailureCategory({ errorText: "Download not verified: file missing", command: "download" }), "download-not-verified");
 	assert.equal(buildAgentBrowserResultCategoryDetails({ failureCategory: "artifact-missing", succeeded: false }).failureCategory, "artifact-missing");
+	assert.deepEqual(buildAgentBrowserResultCategoryDetails({ confirmationRequired: true, succeeded: true }), {
+		failureCategory: "confirmation-required",
+		resultCategory: "failure",
+	});
 	assert.equal(classifyAgentBrowserFailureCategory({ errorText: "agent-browser is required but was not found on PATH" }), "missing-binary");
 	assert.equal(classifyAgentBrowserFailureCategory({ parseError: "agent-browser returned invalid JSON" }), "parse-failure");
 	assert.equal(classifyAgentBrowserFailureCategory({ errorText: "Confirmation required: c_demo" }), "confirmation-required");
