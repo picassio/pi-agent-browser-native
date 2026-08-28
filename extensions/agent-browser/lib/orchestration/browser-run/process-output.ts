@@ -143,6 +143,46 @@ async function repairBatchScreenshotArtifacts(options: {
 	return { envelope: { ...envelope, data: repairedData }, requests: repairedRequests };
 }
 
+const NETWORK_LIST_BODY_FIELDS = new Set(["body", "payload", "postData", "requestBody", "responseBody"]);
+
+function omitNetworkListBodies(data: unknown): unknown {
+	if (!isRecord(data) || !Array.isArray(data.requests)) return data;
+	return {
+		...data,
+		requests: data.requests.map((request) => {
+			if (!isRecord(request)) return request;
+			return Object.fromEntries(Object.entries(request).filter(([key]) => !NETWORK_LIST_BODY_FIELDS.has(key)));
+		}),
+	};
+}
+
+function omitPluginExecutionConfig(data: unknown): unknown {
+	if (!isRecord(data)) return data;
+	const strip = (plugin: unknown): unknown => {
+		if (!isRecord(plugin)) return plugin;
+		return Object.fromEntries(Object.entries(plugin).filter(([key]) => key !== "args" && key !== "source"));
+	};
+	return {
+		...data,
+		...(Array.isArray(data.plugins) ? { plugins: data.plugins.map(strip) } : {}),
+		...(isRecord(data.plugin) ? { plugin: strip(data.plugin) } : {}),
+	};
+}
+
+function sanitizeModelFacingEnvelope(
+	envelope: AgentBrowserEnvelope | undefined,
+	commandInfo: { command?: string; subcommand?: string },
+): AgentBrowserEnvelope | undefined {
+	if (!envelope) return envelope;
+	if (commandInfo.command === "network" && commandInfo.subcommand === "requests") {
+		return { ...envelope, data: omitNetworkListBodies(envelope.data) };
+	}
+	if (commandInfo.command === "plugin" && ["list", "show"].includes(commandInfo.subcommand ?? "")) {
+		return { ...envelope, data: omitPluginExecutionConfig(envelope.data) };
+	}
+	return envelope;
+}
+
 function getEnvelopeErrorString(envelope: AgentBrowserEnvelope | undefined): string | undefined {
 	if (!envelope?.error) return undefined;
 	if (typeof envelope.error === "string") return envelope.error;
@@ -255,6 +295,7 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 		const screenshotArtifactRequest = repairedScreenshot.request;
 		const batchScreenshotArtifactRequests = repairedBatchScreenshots.requests;
 		if (presentationEnvelope && prepared.exactSensitiveValues.length > 0) presentationEnvelope = redactExactSensitiveValue(presentationEnvelope, prepared.exactSensitiveValues) as AgentBrowserEnvelope;
+		presentationEnvelope = sanitizeModelFacingEnvelope(presentationEnvelope, prepared.executionPlan.commandInfo);
 		const parseFailureOutput = parseError ? await preserveParseFailureOutput({ artifactManifest, exactSensitiveValues: prepared.exactSensitiveValues, persistentArtifactStore, stdoutSpillPath: processResult.stdoutSpillPath }) : {};
 		const processSucceeded = !processResult.aborted && !processResult.spawnError && processResult.exitCode === 0;
 		const plainTextInspection = prepared.executionPlan.plainTextInspection && processSucceeded;

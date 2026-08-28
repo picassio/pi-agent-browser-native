@@ -350,7 +350,7 @@ function appendNetworkPreview(lines: string[], label: string, value: unknown, ma
 	lines.push(`   ${label}: ${preview}`);
 }
 
-function formatNetworkRequestLine(item: Record<string, unknown>, index: number): string[] {
+function formatNetworkRequestLine(item: Record<string, unknown>, index: number, includeBodies = false): string[] {
 	const method = getStringField(item, "method") ?? "GET";
 	const status = typeof item.status === "number" ? String(item.status) : "pending";
 	const type = getStringField(item, "resourceType") ?? getStringField(item, "mimeType");
@@ -360,8 +360,10 @@ function formatNetworkRequestLine(item: Record<string, unknown>, index: number):
 	const failureClassification = classifyNetworkRequestFailure(item);
 	const impactText = failureClassification ? ` [${failureClassification.impact}: ${failureClassification.reason}]` : "";
 	const lines = [`${index + 1}. ${status} ${method} ${truncateText(redactSensitiveText(url), 180)}${type ? ` (${type})` : ""}${idText}${impactText}`];
-	appendNetworkPreview(lines, "Payload", getPreviewCandidate(item, NETWORK_PREVIEW_FIELD_CANDIDATES.request), NETWORK_BODY_PREVIEW_MAX_CHARS);
-	appendNetworkPreview(lines, "Response", getPreviewCandidate(item, NETWORK_PREVIEW_FIELD_CANDIDATES.response), NETWORK_BODY_PREVIEW_MAX_CHARS);
+	if (includeBodies) {
+		appendNetworkPreview(lines, "Payload", getPreviewCandidate(item, NETWORK_PREVIEW_FIELD_CANDIDATES.request), NETWORK_BODY_PREVIEW_MAX_CHARS);
+		appendNetworkPreview(lines, "Response", getPreviewCandidate(item, NETWORK_PREVIEW_FIELD_CANDIDATES.response), NETWORK_BODY_PREVIEW_MAX_CHARS);
+	}
 	appendNetworkPreview(lines, "Error", getPreviewCandidate(item, NETWORK_PREVIEW_FIELD_CANDIDATES.error), NETWORK_ERROR_PREVIEW_MAX_CHARS);
 	return lines;
 }
@@ -415,7 +417,7 @@ function formatNetworkRequestText(data: Record<string, unknown>): string | undef
 	if (!getStringField(data, "url") && !getStringField(data, "requestId") && !getStringField(data, "id")) {
 		return undefined;
 	}
-	return formatNetworkRequestLine(data, 0).join("\n");
+	return formatNetworkRequestLine(data, 0, true).join("\n");
 }
 
 interface NetworkRequestActionCandidate {
