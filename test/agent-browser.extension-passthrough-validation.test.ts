@@ -150,9 +150,9 @@ const subcommand = command === "plugin" ? (args[commandIndex + 1] || "list") : u
 if (command === "mcp" && args.includes("--help")) {
   process.stdout.write("agent-browser mcp - Start an MCP stdio server\\nUsage: agent-browser mcp [--tools <profiles>]\\n");
 } else if (subcommand === "list") {
-  process.stdout.write(JSON.stringify({ plugins: [{ name: "demo", capabilities: ["command.run"] }] }));
+  process.stdout.write(JSON.stringify({ plugins: [{ name: "demo", capabilities: ["command.run"], args: ["plugin-canary-secret"], source: "plugin-canary-secret" }] }));
 } else if (subcommand === "show") {
-  process.stdout.write(JSON.stringify({ plugin: { name: args[commandIndex + 2], capabilities: ["command.run"] } }));
+  process.stdout.write(JSON.stringify({ plugin: { name: args[commandIndex + 2], capabilities: ["command.run"], args: ["plugin-canary-secret"], source: "plugin-canary-secret" } }));
 } else {
   process.stdout.write(JSON.stringify({ success: false, error: "unexpected command" }));
 }`,
@@ -171,10 +171,12 @@ if (command === "mcp" && args.includes("--help")) {
 
 			assert.equal(pluginList.isError, false);
 			assert.deepEqual(pluginList.details?.data, { plugins: [{ name: "demo", capabilities: ["command.run"] }] });
+			assert.doesNotMatch(JSON.stringify(pluginList), /plugin-canary-secret/);
 			assert.equal(pluginList.details?.sessionName, undefined);
 			assert.equal(pluginList.details?.usedImplicitSession, undefined);
 			assert.equal(pluginShow.isError, false);
 			assert.deepEqual(pluginShow.details?.data, { plugin: { name: "demo", capabilities: ["command.run"] } });
+			assert.doesNotMatch(JSON.stringify(pluginShow), /plugin-canary-secret/);
 			assert.equal(pluginShow.details?.sessionName, undefined);
 			assert.equal(bareMcp.isError, true);
 			assert.match(bareMcp.content[0]?.text ?? "", /external MCP clients/);
@@ -584,7 +586,7 @@ function ensureFile(file, content) { fs.mkdirSync(path.dirname(file), { recursiv
 let data = { ok: true, command, subcommand };
 if (command === "network" && subcommand === "route") data = { routed: args[commandIndex + 2] };
 if (command === "network" && subcommand === "unroute") data = { unrouted: args[commandIndex + 2] || "all" };
-if (command === "network" && subcommand === "requests") data = { requests: [{ method: "GET", requestId: "n1", status: 200, url: "https://example.test/app.js" }] };
+if (command === "network" && subcommand === "requests") data = { requests: [{ method: "POST", requestId: "n1", status: 200, url: "https://example.test/app.js", postData: "username=demo&pin=network-body-canary", responseBody: "network-response-canary" }] };
 if (command === "network" && subcommand === "request") data = { requestId: args[commandIndex + 2], status: 200, url: "https://example.test/app.js", responseBody: "ok" };
 if (command === "network" && subcommand === "har") {
   const action = args[commandIndex + 2];
@@ -670,6 +672,10 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				if (args[0] === "network" && args[1] === "requests") networkRequestsResult = result;
 			}
 
+			assert.doesNotMatch(JSON.stringify(networkRequestsResult), /network-body-canary|network-response-canary/);
+			assert.deepEqual(networkRequestsResult?.details?.data, {
+				requests: [{ method: "POST", requestId: "n1", status: 200, url: "https://example.test/app.js" }],
+			});
 			const networkNextActions = networkRequestsResult?.details?.nextActions as Array<{ id?: string; params?: { args?: string[] } }> | undefined;
 			assert.deepEqual(networkNextActions?.map((action) => action.id), ["inspect-network-request", "filter-network-requests-by-path", "clear-network-requests-before-repro", "start-network-har-capture"]);
 			assert.deepEqual(networkNextActions?.[0]?.params?.args?.slice(-3), ["network", "request", "n1"]);

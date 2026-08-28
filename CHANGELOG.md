@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.80 - 2026-08-28
+
+### Security
+
+- Remove plugin execution `args` and `source` from model-facing `plugin list` / `plugin show` output.
+- Omit request and response bodies from `network requests` previews and structured details; explicit `network request <id>` remains the intentional detail path with normal redaction.
+- Fail closed on targeted `state clear <name>` because upstream agent-browser 0.34.0 can delete every saved state. Intentional `state clear --all` / `-a` remains available.
+
+### Validation
+
+- Added arbitrary-canary regressions for plugin configuration and form-body/response omission plus a destructive targeted-state-clear guard.
+
 ## 0.2.79 - 2026-08-25
 
 ### Fixed

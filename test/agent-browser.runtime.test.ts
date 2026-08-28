@@ -916,6 +916,13 @@ test("buildExecutionPlan keeps sessionless commands free of implicit managed ses
 	}
 });
 
+test("validateToolArgs blocks destructive targeted state clear on upstream 0.34.0", () => {
+	assert.match(validateToolArgs(["state", "clear", "one-state"]) ?? "", /can delete every saved state/);
+	assert.equal(validateToolArgs(["state", "clear", "--all"]), undefined);
+	assert.equal(validateToolArgs(["state", "clear", "-a"]), undefined);
+	assert.equal(validateToolArgs(["state", "list"]), undefined);
+});
+
 test("validateToolArgs rejects one-shot mcp server calls but preserves --help/-h", () => {
 	assert.match(validateToolArgs(["mcp"]) ?? "", /stdio MCP server/);
 	assert.match(validateToolArgs(["mcp", "--tools", "core,network"]) ?? "", /external MCP clients/);

@@ -384,7 +384,7 @@ test("buildToolPresentation redacts failed stateful batch details", async () => 
 	assert.match(serialized, /\[REDACTED\]/);
 });
 
-test("buildToolPresentation formats redacted network payload, response, and error previews", async () => {
+test("buildToolPresentation omits network-list bodies while retaining redacted errors", async () => {
 	const longResponse = `{"items":["${"x".repeat(400)}"],"token":"response-secret"}`;
 	const presentation = await buildToolPresentation({
 		commandInfo: { command: "network", subcommand: "requests" },
@@ -417,11 +417,7 @@ test("buildToolPresentation formats redacted network payload, response, and erro
 	assert.match(text, /2\. 201 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D&sentry_key=%5BREDACTED%5D&writeKey=%5BREDACTED%5D \(Fetch\) \[req-2\] \[actionable: document, script, API, or non-benign request failure\]/);
 	assert.match(text, /1\. 200 GET https:\/\/example.com\/ \(Document\) \[req-1\]/);
 	assert.ok(text.indexOf("2. 201 POST") < text.indexOf("1. 200 GET"));
-	assert.match(text, /Payload: .*name.*demo/);
-	assert.match(text, /Payload: .*\[REDACTED\]/);
-	assert.match(text, /Payload: .*https:\/\/api\.example\.test\/callback\?token=%5BREDACTED%5D/);
-	assert.match(text, /Response: /);
-	assert.match(text, /Response: .*…/);
+	assert.doesNotMatch(text, /Payload:|Response:/);
 	assert.match(text, /Error: net::ERR_FAILED Authorization: Bearer \[REDACTED\]/);
 	assert.doesNotMatch(text, /User-Agent|secret-agent|body-secret|response-secret|header-secret|url-secret|nested-url-secret|error-secret|sentry-secret|write-secret|Set-Cookie/);
 	assert.deepEqual(presentation.nextActions?.map((action) => action.id), [

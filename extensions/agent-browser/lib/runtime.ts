@@ -683,6 +683,14 @@ function getBareMcpValidationError(args: string[]): string | undefined {
 	return "agent-browser mcp starts a stdio MCP server for external MCP clients, not a one-shot native agent_browser tool workflow. Use the native agent_browser tool modes directly, or configure an MCP client to launch `agent-browser mcp`. Use `mcp --help` for help.";
 }
 
+function getTargetedStateClearValidationError(args: string[]): string | undefined {
+	const { commandInfo, commandTokens } = parseArgvDescriptor(args);
+	if (commandInfo.command !== "state" || commandInfo.subcommand !== "clear") return undefined;
+	const target = commandTokens.slice(2).find((token) => !token.startsWith("-"));
+	if (!target || commandTokens.includes("--all") || commandTokens.includes("-a")) return undefined;
+	return "Targeted `state clear <name>` is blocked because upstream agent-browser 0.34.0 can delete every saved state. Use `state list` to inspect names; only use `state clear --all` when deleting all states is intentional.";
+}
+
 export function validateToolArgs(args: string[]): string | undefined {
 	if (args.length === 0) {
 		return "`args` must contain at least one agent-browser command token.";
@@ -698,7 +706,7 @@ export function validateToolArgs(args: string[]): string | undefined {
 		return "Do not pass `--session-mode` in args. Use the top-level agent_browser `sessionMode` field instead, for example { args: [\"--profile\", \"Default\", \"open\", \"https://example.com\"], sessionMode: \"fresh\" }.";
 	}
 
-	return getBareMcpValidationError(args) ?? getSingleKeyCommandValidationError(args);
+	return getBareMcpValidationError(args) ?? getTargetedStateClearValidationError(args) ?? getSingleKeyCommandValidationError(args);
 }
 
 function getInvalidValueFlagDetails(args: string[]): InvalidValueFlagDetails | undefined {
