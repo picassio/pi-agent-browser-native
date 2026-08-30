@@ -43,7 +43,7 @@ import {
 	type SessionRefSnapshot,
 	type SessionRefSnapshotInvalidation,
 } from "../../session-page-state.js";
-import { extractExplicitSessionName, redactInvocationArgs, redactSensitiveText, redactSensitiveValue, type OpenResultTabCorrection } from "../../runtime.js";
+import { extractExplicitSessionName, findCommandStartIndex, redactInvocationArgs, redactSensitiveText, redactSensitiveValue, type OpenResultTabCorrection } from "../../runtime.js";
 import { isRecord } from "../../parsing.js";
 import { buildClickDispatchNextActions, formatClickDispatchDiagnosticText } from "./click-dispatch.js";
 import {
@@ -355,21 +355,31 @@ function buildDialogTimeoutNextActions(options: { command?: string; sessionName?
 	];
 }
 
-function withConfirmationPolicyArgs(sourceArgs: readonly string[], recoveryArgs: string[]): string[] {
-	for (let index = 0; index < sourceArgs.length; index += 1) {
-		const token = sourceArgs[index];
-		if (token === "--confirm-actions" && sourceArgs[index + 1]) return [token, sourceArgs[index + 1], ...recoveryArgs];
-		if (token.startsWith("--confirm-actions=")) return [token, ...recoveryArgs];
-	}
-	return recoveryArgs;
+function withConfirmationContextArgs(sourceArgs: readonly string[], recoveryArgs: string[]): string[] {
+	const commandStartIndex = findCommandStartIndex([...sourceArgs]);
+	return commandStartIndex === undefined
+		? recoveryArgs
+		: [...sourceArgs.slice(0, commandStartIndex), ...recoveryArgs];
+}
+
+function formatConfirmationRecoveryText(nextActions: AgentBrowserNextAction[] | undefined): string | undefined {
+	const confirmationActions = nextActions?.filter((action) => action.id === "approve-confirmation" || action.id === "deny-confirmation");
+	if (!confirmationActions || confirmationActions.length === 0) return undefined;
+	return [
+		"Exact bound confirmation calls (preserve this session and configuration):",
+		...confirmationActions.map((action) => `- ${action.id === "approve-confirmation" ? "Approve" : "Deny"}: ${JSON.stringify(action.params)}`),
+	].join("\n");
 }
 
 function buildResultNextActions(options: FinalResultInput): AgentBrowserNextAction[] | undefined {
 	const presentationNextActions = options.categoryDetails.failureCategory === "confirmation-required"
 		? options.presentation.nextActions?.map((action) => {
 			if ((action.id !== "approve-confirmation" && action.id !== "deny-confirmation") || !action.params?.args) return action;
-			const policyBoundArgs = withConfirmationPolicyArgs(options.redactedArgs, action.params.args);
-			return { ...action, params: { ...action.params, args: withOptionalSessionArgs(options.executionPlan.sessionName, policyBoundArgs) } };
+			const contextBoundArgs = withConfirmationContextArgs(options.redactedArgs, action.params.args);
+			const args = extractExplicitSessionName(contextBoundArgs)
+				? contextBoundArgs
+				: withOptionalSessionArgs(options.executionPlan.sessionName, contextBoundArgs);
+			return { ...action, params: { ...action.params, args } };
 		})
 		: options.presentation.nextActions;
 	const nextActionCollector = new AgentBrowserNextActionCollector(presentationNextActions);
@@ -495,6 +505,7 @@ export function buildFinalAgentBrowserToolResult(options: FinalResultInput): Age
 	const details = buildAgentBrowserResultDetails(options, nextActions);
 	const visibleRefFallbackText = formatVisibleRefFallbackText(options.visibleRefFallbackDiagnostic);
 	const richInputRecoveryText = formatRichInputRecoveryText(options.richInputRecoveryDiagnostic);
+	const confirmationRecoveryText = formatConfirmationRecoveryText(nextActions);
 	const semanticActionCandidateText = nextActions ? formatSemanticActionCandidateText(nextActions) : undefined;
 	const clickDispatchText = options.clickDispatchDiagnostic ? formatClickDispatchDiagnosticText(options.clickDispatchDiagnostic) : undefined;
 	const overlayBlockerText = options.overlayBlockerDiagnostic ? formatOverlayBlockerText(options.overlayBlockerDiagnostic) : undefined;
@@ -510,7 +521,7 @@ export function buildFinalAgentBrowserToolResult(options: FinalResultInput): Age
 	const artifactCleanupText = formatArtifactCleanupGuidanceText(options.artifactCleanup);
 	const timeoutPartialProgressText = options.timeoutPartialProgress ? formatTimeoutPartialProgressText(options.timeoutPartialProgress) : undefined;
 	const managedSessionOutcomeText = formatManagedSessionOutcomeText(options.managedSessionOutcome);
-	const rawAppendedDiagnosticText = [visibleRefFallbackText, richInputRecoveryText, semanticActionCandidateText, clickDispatchText, overlayBlockerText, fillVerificationText, electronRefFreshnessText, selectorTextVisibilityText, electronBroadGetTextScopeText, scrollNoopDiagnosticText, comboboxFocusDiagnosticText, recordingDependencyWarningText, evalStdinHintText, evalResultWarningText, artifactCleanupText, timeoutPartialProgressText, managedSessionOutcomeText].filter((item): item is string => item !== undefined).join("\n\n");
+	const rawAppendedDiagnosticText = [visibleRefFallbackText, richInputRecoveryText, confirmationRecoveryText, semanticActionCandidateText, clickDispatchText, overlayBlockerText, fillVerificationText, electronRefFreshnessText, selectorTextVisibilityText, electronBroadGetTextScopeText, scrollNoopDiagnosticText, comboboxFocusDiagnosticText, recordingDependencyWarningText, evalStdinHintText, evalResultWarningText, artifactCleanupText, timeoutPartialProgressText, managedSessionOutcomeText].filter((item): item is string => item !== undefined).join("\n\n");
 	const appendedDiagnosticText = redactSensitiveText(redactExactSensitiveText(rawAppendedDiagnosticText, options.exactSensitiveValues));
 	const shouldAppendDiagnosticText = appendedDiagnosticText.length > 0 && (!options.userRequestedJson || options.plainTextInspection);
 	let content = shouldAppendDiagnosticText && options.redactedContent[0]?.type === "text" ? [{ ...options.redactedContent[0], text: `${options.redactedContent[0].text}\n\n${appendedDiagnosticText}` }, ...options.redactedContent.slice(1)] : options.redactedContent;

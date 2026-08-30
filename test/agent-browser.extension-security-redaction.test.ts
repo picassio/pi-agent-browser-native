@@ -232,17 +232,21 @@ test("agentBrowserExtension renders confirmation recovery and redacts sensitive 
 		tempDir,
 		`const fs = require("node:fs");
 const args = process.argv.slice(2);
-const sessionIndex = args.indexOf("--session");
-const session = sessionIndex >= 0 ? args[sessionIndex + 1] : "";
-const confirmActionsIndex = args.indexOf("--confirm-actions");
-const confirmActionsEquals = args.find((arg) => arg.startsWith("--confirm-actions="));
-const confirmActions = confirmActionsIndex >= 0 ? args[confirmActionsIndex + 1] : confirmActionsEquals?.slice("--confirm-actions=".length) ?? "";
+const value = (flag) => {
+  const index = args.indexOf(flag);
+  const equal = args.find((arg) => arg.startsWith(flag + "="));
+  return index >= 0 ? args[index + 1] : equal?.slice(flag.length + 1) ?? "";
+};
+const session = value("--session");
+const config = value("--config");
+const allowedDomains = value("--allowed-domains");
+const confirmActions = value("--confirm-actions");
 if (args.includes("confirm")) {
   const pending = fs.existsSync(${JSON.stringify(pendingPath)}) ? JSON.parse(fs.readFileSync(${JSON.stringify(pendingPath)}, "utf8")) : {};
-  if (session && session === pending.session && confirmActions === pending.confirmActions) process.stdout.write(JSON.stringify({ success: true, data: "Action confirmed" }));
+  if (session && session === pending.session && config === pending.config && allowedDomains === pending.allowedDomains && confirmActions === pending.confirmActions) process.stdout.write(JSON.stringify({ success: true, data: "Action confirmed" }));
   else { process.stdout.write(JSON.stringify({ success: false, error: "No pending confirmation" })); process.exitCode = 1; }
 } else if (confirmActions) {
-  fs.writeFileSync(${JSON.stringify(pendingPath)}, JSON.stringify({ args, confirmActions, session }));
+  fs.writeFileSync(${JSON.stringify(pendingPath)}, JSON.stringify({ allowedDomains, args, config, confirmActions, session }));
   process.stdout.write(JSON.stringify({ success: true, data: { confirmation_required: true, confirmation_id: "c_sensitive", action: "POST https://user:pass@example.com/delete?token=secret Authorization: Bearer raw-token" } }));
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
@@ -254,8 +258,18 @@ if (args.includes("confirm")) {
 			const harness = createExtensionHarness({ cwd: tempDir });
 			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
+			const configPath = join(tempDir, "agent-browser.json");
 			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
-				args: ["--confirm-actions", "click", "click", "@danger"],
+				args: [
+					"--config",
+					configPath,
+					"--allowed-domains",
+					"example.com",
+					"--confirm-actions",
+					"click",
+					"click",
+					"@danger",
+				],
 				sessionMode: "fresh",
 			});
 
@@ -274,9 +288,32 @@ if (args.includes("confirm")) {
 			const sessionName = String(result.details?.sessionName ?? "");
 			assert.ok(sessionName);
 			assert.deepEqual(confirmationActions?.map((action) => action.params?.args), [
-				["--session", sessionName, "--confirm-actions", "click", "confirm", "c_sensitive"],
-				["--session", sessionName, "--confirm-actions", "click", "deny", "c_sensitive"],
+				[
+					"--session",
+					sessionName,
+					"--config",
+					configPath,
+					"--allowed-domains",
+					"example.com",
+					"--confirm-actions",
+					"click",
+					"confirm",
+					"c_sensitive",
+				],
+				[
+					"--session",
+					sessionName,
+					"--config",
+					configPath,
+					"--allowed-domains",
+					"example.com",
+					"--confirm-actions",
+					"click",
+					"deny",
+					"c_sensitive",
+				],
 			]);
+			assert.match(text, new RegExp(`--allowed-domains.*example\\.com.*confirm.*c_sensitive`, "s"));
 			const confirmed = await executeRegisteredTool(harness.tool, harness.ctx, confirmationActions?.[0]?.params);
 			assert.equal(confirmed.isError, false, JSON.stringify(confirmed));
 			assert.match((confirmed.content[0] as { text: string }).text, /Action confirmed/);
