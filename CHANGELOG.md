@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.81 - 2026-08-30
+
+### Fixed
+
+- Preserve the complete redacted global invocation context—including config and launch-scoped containment flags—in confirm/deny recovery payloads so upstream does not restart the owning daemon and discard a pending action.
+- Render the exact bound confirmation payloads in model-visible output as well as `details.nextActions`.
+
+### Validation
+
+- Extended the process-separated confirmation regression to require the original session, config, allowed-domain policy and confirmation policy before the pending action can complete.
+
 ## 0.2.80 - 2026-08-28
 
 ### Security
